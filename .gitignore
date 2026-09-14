@@ -1,2 +1,30 @@
-SketchyBar
-spacebar
+# Reference codebases (not part of omabar)
+SketchyBar/
+spacebar/
+
+# Build artifacts
+result
+result-*
+dist/
+*.o
+*.d
+*.dylib
+
+# Nix
+result
+result-*
+
+# macOS
+.DS_Store
+*.app
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temp
+*.tmp
+*.bak
