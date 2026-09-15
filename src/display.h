@@ -9,6 +9,7 @@ unsigned int display_arrangement_id(CGDirectDisplayID did);
 CGRect display_bounds(CGDirectDisplayID did);
 uint64_t display_space_id(CGDirectDisplayID did);
 uint64_t display_space_display_id(uint64_t sid);
+uint64_t *display_space_list(CGDirectDisplayID did, int *space_count);
 void display_observe(int *did);
 int display_begin(void);
 void display_end(void);

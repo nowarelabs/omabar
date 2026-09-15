@@ -15,7 +15,7 @@ static id ca_context_create(uint32_t cid, NSDictionary *options) {
     SEL sel = NSSelectorFromString(@"contextWithCGSConnection:options:");
     if (!sel) return NULL;
     id (*msg)(Class, SEL, uint32_t, id) = (void *)objc_msgSend;
-    return [[msg(cls, sel, cid, options) retain] autorelease];
+    return [msg(cls, sel, cid, options) retain];
 }
 
 static void ca_context_set_layer(id ctx, id layer) {
@@ -84,4 +84,11 @@ void layer_set_contents(struct layer *layer, CGImageRef image) {
 void layer_set_alpha(struct layer *layer, float alpha) {
     if (!layer || !layer->root) return;
     [(CALayer *)layer->root setOpacity:alpha];
+}
+
+void layer_set_bounds(struct layer *layer, CGRect bounds) {
+    if (!layer || !layer->root) return;
+    CALayer *calayer = (CALayer *)layer->root;
+    [CATransaction setDisableActions:YES];
+    calayer.bounds = bounds;
 }

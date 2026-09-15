@@ -1,10 +1,23 @@
 #include "display.h"
+#include "display_nsscreen.h"
 #include "event.h"
 #include "misc/extern.h"
 #include "misc/helpers.h"
 #include <CoreGraphics/CoreGraphics.h>
 
 static CGDisplayReconfigurationCallBack g_callback = NULL;
+
+#define DISPLAY_IDENTIFIER_KEY CFSTR("Display Identifier")
+#define CURRENT_SPACE_KEY      CFSTR("Current Space")
+#define DISPLAY_SPACES_KEY     CFSTR("Spaces")
+#define SPACE_ID64_KEY         CFSTR("id64")
+#define SPACE_ID_KEY           CFSTR("SpaceID")
+
+#define MAX_DISPLAYS 8
+
+static bool display_uuid_matches(CFStringRef uuid_string,
+                                 CGDirectDisplayID did);
+static uint64_t display_space_id_from_dict(CFDictionaryRef space_dict);
 
 unsigned int display_arrangement_id(CGDirectDisplayID did) {
     if (!did) return 0;
@@ -13,10 +26,16 @@ unsigned int display_arrangement_id(CGDirectDisplayID did) {
 
     CFIndex count = CFArrayGetCount(displays);
     for (CFIndex i = 0; i < count; i++) {
-        const CFNumberRef num = CFArrayGetValueAtIndex(displays, i);
-        CGDirectDisplayID d = 0;
-        CFNumberGetValue(num, kCFNumberIntType, &d);
-        if (d == did) {
+        const void *entry = CFArrayGetValueAtIndex(displays, i);
+        if (CFGetTypeID(entry) == CFNumberGetTypeID()) {
+            CGDirectDisplayID d = 0;
+            CFNumberGetValue(entry, kCFNumberIntType, &d);
+            if (d == did) {
+                CFRelease(displays);
+                return (unsigned int)i + 1;
+            }
+        } else if (CFGetTypeID(entry) == CFStringGetTypeID() &&
+                   display_uuid_matches(entry, did)) {
             CFRelease(displays);
             return (unsigned int)i + 1;
         }
@@ -30,21 +49,123 @@ CGRect display_bounds(CGDirectDisplayID did) {
 }
 
 uint64_t display_space_id(CGDirectDisplayID did) {
-    CFStringRef uuid = SLSManagedDisplayGetCurrentSpace(g_connection, did);
-    if (!uuid) return 0;
-
+    CFArrayRef managed = SLSCopyManagedDisplaySpaces(g_connection);
     uint64_t sid = 0;
-    CFNumberRef num = SLSGetSpaceIDForUUID(g_connection, uuid);
-    if (num) {
-        CFNumberGetValue(num, kCFNumberSInt64Type, &sid);
-        CFRelease(num);
+
+    if (managed) {
+        for (CFIndex i = 0; i < CFArrayGetCount(managed); i++) {
+            CFDictionaryRef display_info = CFArrayGetValueAtIndex(managed, i);
+            if (!display_info) continue;
+
+            CFStringRef display_uuid = CFDictionaryGetValue(display_info,
+                                                            DISPLAY_IDENTIFIER_KEY);
+            if (!display_uuid || !display_uuid_matches(display_uuid, did))
+                continue;
+
+            CFDictionaryRef current = CFDictionaryGetValue(display_info,
+                                                           CURRENT_SPACE_KEY);
+            if (current && CFGetTypeID(current) == CFDictionaryGetTypeID())
+                sid = display_space_id_from_dict(current);
+            break;
+        }
+        CFRelease(managed);
     }
-    CFRelease(uuid);
+
+    if (!sid) sid = SLSGetActiveSpace(g_connection);
     return sid;
 }
 
 uint64_t display_space_display_id(uint64_t sid) {
-    return SLSGetDisplayIDForSpace(g_connection, sid);
+    CGDirectDisplayID result = 0;
+    if (!sid) return result;
+
+    CFStringRef display_uuid = SLSCopyManagedDisplayForSpace(g_connection, sid);
+    if (!display_uuid) return result;
+
+    uint32_t count = 0;
+    CGDirectDisplayID displays[MAX_DISPLAYS];
+    if (CGGetActiveDisplayList(MAX_DISPLAYS, displays, &count) != kCGErrorSuccess) {
+        CFRelease(display_uuid);
+        return result;
+    }
+
+    CFUUIDRef wanted = CFUUIDCreateFromString(kCFAllocatorDefault, display_uuid);
+    for (uint32_t i = 0; i < count && wanted; i++) {
+        CFUUIDRef candidate = CGDisplayCreateUUIDFromDisplayID(displays[i]);
+        if (candidate && CFEqual(wanted, candidate))
+            result = displays[i];
+        if (candidate) CFRelease(candidate);
+        if (result) break;
+    }
+    if (wanted) CFRelease(wanted);
+    CFRelease(display_uuid);
+    return result;
+}
+
+static bool display_uuid_matches(CFStringRef uuid_string,
+                                 CGDirectDisplayID did) {
+    CFUUIDRef display_uuid = CGDisplayCreateUUIDFromDisplayID(did);
+    if (!display_uuid) return false;
+
+    CFUUIDRef uuid = CFUUIDCreateFromString(kCFAllocatorDefault, uuid_string);
+    bool matches = uuid ? (CFEqual(display_uuid, uuid)) : false;
+    if (uuid) CFRelease(uuid);
+    CFRelease(display_uuid);
+    return matches;
+}
+
+static uint64_t display_space_id_from_dict(CFDictionaryRef space_dict) {
+    uint64_t sid = 0;
+
+    CFNumberRef id64 = CFDictionaryGetValue(space_dict, SPACE_ID64_KEY);
+    if (id64 && CFGetTypeID(id64) == CFNumberGetTypeID()) {
+        CFNumberGetValue(id64, kCFNumberSInt64Type, &sid);
+        return sid;
+    }
+
+    /* legacy macOS builds use "SpaceID" instead of "id64" */
+    CFNumberRef legacy = CFDictionaryGetValue(space_dict, SPACE_ID_KEY);
+    if (legacy && CFGetTypeID(legacy) == CFNumberGetTypeID())
+        CFNumberGetValue(legacy, kCFNumberSInt64Type, &sid);
+
+    return sid;
+}
+
+uint64_t *display_space_list(CGDirectDisplayID did, int *space_count) {
+    *space_count = 0;
+
+    CFArrayRef managed = SLSCopyManagedDisplaySpaces(g_connection);
+    if (!managed) return NULL;
+
+    uint64_t *result = NULL;
+    int count = 0;
+
+    for (CFIndex i = 0; i < CFArrayGetCount(managed); i++) {
+        CFDictionaryRef display_info = CFArrayGetValueAtIndex(managed, i);
+        if (!display_info) continue;
+
+        CFStringRef display_uuid = CFDictionaryGetValue(display_info,
+                                                        DISPLAY_IDENTIFIER_KEY);
+        if (!display_uuid || !display_uuid_matches(display_uuid, did)) continue;
+
+        CFArrayRef spaces = CFDictionaryGetValue(display_info,
+                                                 DISPLAY_SPACES_KEY);
+        if (!spaces) continue;
+
+        for (CFIndex j = 0; j < CFArrayGetCount(spaces); j++) {
+            CFDictionaryRef space_info = CFArrayGetValueAtIndex(spaces, j);
+            uint64_t sid = space_info ? display_space_id_from_dict(space_info) : 0;
+            if (!sid) continue;
+
+            buf_push(result, sid);
+            count++;
+        }
+        break;
+    }
+
+    CFRelease(managed);
+    *space_count = count;
+    return result;
 }
 
 static void display_reconfiguration_callback(CGDirectDisplayID display,
@@ -80,11 +201,14 @@ bool display_has_notch(CGDirectDisplayID did) {
 }
 
 CGRect display_safe_area(CGDirectDisplayID did) {
-    return display_bounds(did);
+    CGRect safe = display_nsscreen_safe_area(did);
+    if (CGRectIsNull(safe)) return display_bounds(did);
+    return safe;
 }
 
 void display_observe(int *did) {
     (void)did;
+    display_begin();
 }
 
 void display_brightness_begin(void) {

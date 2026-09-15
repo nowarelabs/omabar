@@ -23,6 +23,6 @@ void graph_destroy(struct graph *graph);
 void graph_set_fill_color(struct graph *graph, struct color color);
 void graph_set_line_color(struct graph *graph, struct color color);
 void graph_push_value(struct graph *graph, float value);
-void graph_draw(struct graph *graph, struct CGContext *ctx, CGRect frame);
+void graph_draw(struct graph *graph, CGContextRef ctx, CGRect frame);
 
 #endif

@@ -38,6 +38,58 @@ void graph_push_value(struct graph *graph, float value) {
     graph->data[graph->count++] = value;
 }
 
-void graph_draw(struct graph *graph, struct CGContext *ctx, CGRect frame) {
-    (void)graph; (void)ctx; (void)frame;
+void graph_draw(struct graph *graph, CGContextRef ctx, CGRect frame) {
+    if (!graph || !ctx || graph->count < 2) return;
+
+    CGContextSaveGState(ctx);
+
+    int n = graph->count;
+    float step = frame.size.width / (float)(n - 1);
+    float base = frame.origin.y + frame.size.height;
+
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathMoveToPoint(path, NULL,
+                      frame.origin.x,
+                      base - graph->data[0] * frame.size.height);
+    for (int i = 1; i < n; i++) {
+        CGPathAddLineToPoint(path, NULL,
+                             frame.origin.x + i * step,
+                             base - graph->data[i] * frame.size.height);
+    }
+
+    if (graph->fill_color.a > 0) {
+        CGPathAddLineToPoint(path, NULL,
+                             frame.origin.x + (n - 1) * step, base);
+        CGPathAddLineToPoint(path, NULL, frame.origin.x, base);
+        CGPathCloseSubpath(path);
+        CGContextSetRGBFillColor(ctx,
+                                 graph->fill_color.r,
+                                 graph->fill_color.g,
+                                 graph->fill_color.b,
+                                 graph->fill_color.a);
+        CGContextAddPath(ctx, path);
+        CGContextFillPath(ctx);
+        CGPathRelease(path);
+        path = CGPathCreateMutable();
+        CGPathMoveToPoint(path, NULL,
+                          frame.origin.x,
+                          base - graph->data[0] * frame.size.height);
+        for (int i = 1; i < n; i++) {
+            CGPathAddLineToPoint(path, NULL,
+                                 frame.origin.x + i * step,
+                                 base - graph->data[i] * frame.size.height);
+        }
+    }
+
+    CGContextSetLineWidth(ctx, 1.0f);
+    CGContextSetRGBStrokeColor(ctx,
+                               graph->line_color.r,
+                               graph->line_color.g,
+                               graph->line_color.b,
+                               graph->line_color.a);
+    CGContextAddPath(ctx, path);
+    CGContextStrokePath(ctx);
+    CGPathRelease(path);
+
+    CGContextRestoreGState(ctx);
 }

@@ -1,9 +1,11 @@
 #include "event.h"
+#include "window.h"
 #include <dispatch/dispatch.h>
+#include <pthread.h>
 
 event_handler_fn g_event_handler[EVENT_COUNT];
 
-static void default_handler(struct event *event) {
+static void default_handler(const struct event *event) {
     (void)event;
 }
 
@@ -23,7 +25,8 @@ void event_post(struct event *event) {
         event_execute(event);
 }
 
-void event_execute(struct event *event) {
+void event_execute(const struct event *event) {
     if (event && event->type < EVENT_COUNT)
         g_event_handler[event->type](event);
+    windows_unfreeze();
 }

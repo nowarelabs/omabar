@@ -14,5 +14,6 @@ struct layer *layer_create(uint32_t cid);
 void layer_destroy(struct layer *layer);
 void layer_set_contents(struct layer *layer, CGImageRef image);
 void layer_set_alpha(struct layer *layer, float alpha);
+void layer_set_bounds(struct layer *layer, CGRect bounds);
 
 #endif

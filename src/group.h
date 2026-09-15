@@ -9,11 +9,14 @@ struct group {
     int item_count;
     struct bar_item *bracket;
     bool bracket_recursive;
+    CGRect bounds;
 };
 
-void group_create(struct group *group, struct bar_item *parent);
+void group_init(struct group *group);
 void group_destroy(struct group *group);
+bool group_is_item_member(struct group *group, struct bar_item *item);
 void group_add_item(struct group *group, struct bar_item *item);
 void group_remove_item(struct group *group, struct bar_item *item);
+void group_calculate_bounds(struct group *group);
 
 #endif

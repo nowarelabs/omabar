@@ -23,6 +23,12 @@ static void *resolve_symbol(const char *name) {
     return sym;
 }
 
+static void *resolve_symbol_quiet(const char *name) {
+    void *handle = framework_handle();
+    if (!handle) return NULL;
+    return dlsym(handle, name);
+}
+
 void SLSSetWindowOrigin(int cid, uint32_t wid, float x, float y) {
     void *sym = resolve_symbol("SLSSetWindowOrigin");
     if (!sym) return;
@@ -30,7 +36,7 @@ void SLSSetWindowOrigin(int cid, uint32_t wid, float x, float y) {
 }
 
 void SLSUnbindSurface(int cid, uint32_t wid, uint32_t sid) {
-    void *sym = resolve_symbol("SLSUnbindSurface");
+    void *sym = resolve_symbol_quiet("SLSUnbindSurface");
     if (!sym) return;
     ((void (*)(int, uint32_t, uint32_t))sym)(cid, wid, sid);
 }
@@ -45,4 +51,14 @@ CGDirectDisplayID SLSGetDisplayIDForSpace(int cid, uint64_t sid) {
     void *sym = resolve_symbol("SLSGetDisplayIDForSpace");
     if (!sym) return 0;
     return ((CGDirectDisplayID (*)(int, uint64_t))sym)(cid, sid);
+}
+
+CGError (*SBSLSTransactionAddPostDecodeAction)(CFTypeRef transaction,
+                                               void (^block)());
+
+__attribute__((constructor)) static void resolve_optional_symbols(void) {
+    void *handle = framework_handle();
+    if (!handle) return;
+    SBSLSTransactionAddPostDecodeAction =
+        dlsym(handle, "SBSLSTransactionAddPostDecodeAction");
 }

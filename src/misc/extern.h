@@ -226,6 +226,8 @@ extern void SLSSetWindowOrigin(int cid, uint32_t wid, float x, float y);
 extern void SLSUnbindSurface(int cid, uint32_t wid, uint32_t sid);
 extern CFNumberRef SLSGetSpaceIDForUUID(int cid, CFStringRef uuid);
 extern CGDirectDisplayID SLSGetDisplayIDForSpace(int cid, uint64_t sid);
+extern CGError (*SBSLSTransactionAddPostDecodeAction)(
+    CFTypeRef transaction, void (^block)());
 
 /* ═══════════════════════════════════════════════════════════════
    Global CGS connection — initialised in window.c via

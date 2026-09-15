@@ -29,6 +29,6 @@ struct background {
 
 void background_init(struct background *bg);
 void background_destroy(struct background *bg);
-void background_draw(struct background *bg, struct CGContext *ctx, CGRect bounds);
+void background_draw(struct background *bg, CGContextRef ctx, CGRect bounds);
 
 #endif
