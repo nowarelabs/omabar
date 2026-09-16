@@ -3,6 +3,7 @@
 
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreText/CoreText.h>
+#include <dispatch/dispatch.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -205,17 +206,21 @@ extern CGError SLSRequestNotificationsForWindows(
 extern CFUUIDRef CGDisplayCreateUUIDFromDisplayID(uint32_t did);
 
 /* ═══════════════════════════════════════════════════════════════
-   MediaRemote — private MediaRemote.framework
+   MediaRemote — private MediaRemote.framework (ObjC translation
+   units only; the block-based API needs NSDictionary/NSString)
    ═══════════════════════════════════════════════════════════════ */
+#ifdef __OBJC__
 extern void MRMediaRemoteRegisterForNowPlayingNotifications(
-    void (*handler)(CFDictionaryRef info));
-extern void MRMediaRemoteUnregisterForNowPlayingNotifications(
-    void (*handler)(CFDictionaryRef info));
-extern CFDictionaryRef MRMediaRemoteGetNowPlayingInfo(void);
+    dispatch_queue_t queue);
+extern void MRMediaRemoteUnregisterForNowPlayingNotifications(void);
+extern void MRMediaRemoteGetNowPlayingInfo(
+    dispatch_queue_t queue, void (^block)(NSDictionary *dict));
 extern CFStringRef kMRMediaRemoteNowPlayingInfoTitle;
 extern CFStringRef kMRMediaRemoteNowPlayingInfoArtist;
 extern CFStringRef kMRMediaRemoteNowPlayingInfoAlbum;
 extern CFStringRef kMRMediaRemoteNowPlayingInfoPlaybackRate;
+extern NSString *kMRMediaRemoteNowPlayingApplicationDisplayNameUserInfoKey;
+#endif /* __OBJC__ */
 
 /* ═══════════════════════════════════════════════════════════════
    Private symbols that exist on some macOS releases but are not

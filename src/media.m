@@ -4,58 +4,169 @@
 #include <Foundation/Foundation.h>
 #include <objc/runtime.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
-static NSObject *g_media_observer = NULL;
+static id g_token_info = nil;
+static id g_token_playing = nil;
+static bool g_media_events = false;
 
-static void media_info_callback(CFDictionaryRef info) {
-    (void)info;
-    struct event event = { .type = EVENT_MEDIA_CHANGED };
-    event_post(&event);
+static void post_media_changed(void) {
+    @autoreleasepool {
+        struct media_info *minfo = media_get_info();
+        if (!minfo) {
+            struct event event = { .type = EVENT_MEDIA_CHANGED };
+            event_post(&event);
+            return;
+        }
+
+        size_t len = strlen(minfo->app) + strlen(minfo->title)
+                   + strlen(minfo->artist) + strlen(minfo->album) + 256;
+        char *json = calloc(1, len);
+        if (!json) { media_free_info(minfo); return; }
+
+        snprintf(json, len,
+                 "{\n"
+                 "\t\"state\": \"%s\",\n"
+                 "\t\"title\": \"%s\",\n"
+                 "\t\"album\": \"%s\",\n"
+                 "\t\"artist\": \"%s\",\n"
+                 "\t\"app\": \"%s\"\n}",
+                 minfo->playing ? "playing" : "paused",
+                 minfo->title, minfo->album, minfo->artist, minfo->app);
+
+        struct event event = { .type = EVENT_MEDIA_CHANGED, .data = json };
+        event_post(&event);
+        media_free_info(minfo);
+    }
+}
+
+void forced_media_event(void) {
+    post_media_changed();
 }
 
 void media_begin(void) {
-    g_media_observer = [[NSObject alloc] init];
+    if (g_media_events) return;
+    g_media_events = true;
 
-    MRMediaRemoteRegisterForNowPlayingNotifications(media_info_callback);
+    MRMediaRemoteRegisterForNowPlayingNotifications(NULL);
 
-    [[NSDistributedNotificationCenter defaultCenter] addObserver:g_media_observer
-            selector:@selector(mediaChanged:)
-                name:@"kMRMediaRemoteNowPlayingInfoDidChangeNotification"
-              object:nil];
+    g_token_info =
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"kMRMediaRemoteNowPlayingInfoDidChangeNotification"
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        post_media_changed();
+                    }];
+
+    g_token_playing =
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification"
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        post_media_changed();
+                    }];
+
+    forced_media_event();
 }
 
 void media_end(void) {
-    if (g_media_observer) {
-        [[NSDistributedNotificationCenter defaultCenter] removeObserver:g_media_observer];
-        g_media_observer = NULL;
+    if (g_token_info) {
+        [[NSNotificationCenter defaultCenter] removeObserver:g_token_info];
+        g_token_info = nil;
     }
+    if (g_token_playing) {
+        [[NSNotificationCenter defaultCenter] removeObserver:g_token_playing];
+        g_token_playing = nil;
+    }
+}
+
+static char *copy_cf_string(CFStringRef str) {
+    if (!str) return strdup("");
+    CFIndex length = CFStringGetLength(str);
+    CFIndex capacity = CFStringGetMaximumSizeForEncoding(
+        length, kCFStringEncodingUTF8) + 1;
+    char *buffer = calloc(1, (size_t)capacity);
+    if (!buffer) return strdup("");
+    if (!CFStringGetCString(str, buffer, capacity, kCFStringEncodingUTF8)) {
+        free(buffer);
+        return strdup("");
+    }
+    return buffer;
 }
 
 struct media_info *media_get_info(void) {
     struct media_info *info = calloc(1, sizeof(*info));
     if (!info) return NULL;
 
-    CFDictionaryRef meta = MRMediaRemoteGetNowPlayingInfo();
-    if (!meta) { free(info); return NULL; }
+    info->app = strdup("unknown");
+    info->title = strdup("");
+    info->artist = strdup("");
+    info->album = strdup("");
+    info->playing = false;
 
-    CFStringRef title = CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoTitle);
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block CFDictionaryRef meta = NULL;
+
+    MRMediaRemoteGetNowPlayingInfo(dispatch_get_global_queue(
+                                       DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                                   ^(NSDictionary *dict) {
+                                       meta = (CFDictionaryRef)dict;
+                                       if (meta)
+                                           CFRetain(meta);
+                                       dispatch_semaphore_signal(sem);
+                                   });
+
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
+                                               (int64_t)(5 * NSEC_PER_SEC)));
+    dispatch_release(sem);
+
+    if (!meta) {
+        /* No media session active — return empty info. */
+        return info;
+    }
+
+    CFStringRef title =
+        CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoTitle);
     if (title) {
-        info->title = (char *)CFStringGetCStringPtr(title, kCFStringEncodingUTF8);
-    }
-    CFStringRef artist = CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoArtist);
-    if (artist) {
-        info->artist = (char *)CFStringGetCStringPtr(artist, kCFStringEncodingUTF8);
-    }
-    CFStringRef album = CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoAlbum);
-    if (album) {
-        info->album = (char *)CFStringGetCStringPtr(album, kCFStringEncodingUTF8);
+        free(info->title);
+        info->title = copy_cf_string(title);
     }
 
-    CFNumberRef state = CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoPlaybackRate);
+    CFStringRef artist =
+        CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoArtist);
+    if (artist) {
+        free(info->artist);
+        info->artist = copy_cf_string(artist);
+    }
+
+    CFStringRef album =
+        CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoAlbum);
+    if (album) {
+        free(info->album);
+        info->album = copy_cf_string(album);
+    }
+
+    CFNumberRef state =
+        CFDictionaryGetValue(meta, kMRMediaRemoteNowPlayingInfoPlaybackRate);
     if (state) {
-        float rate = 0;
+        float rate = 0.0f;
         CFNumberGetValue(state, kCFNumberFloatType, &rate);
-        info->playing = rate > 0;
+        info->playing = rate > 0.0f;
+    }
+
+    NSString *display_name = CFDictionaryGetValue(
+        meta, kMRMediaRemoteNowPlayingApplicationDisplayNameUserInfoKey);
+    if (display_name && [display_name isKindOfClass:[NSString class]]) {
+        const char *utf8 = [display_name UTF8String];
+        if (utf8) {
+            free(info->app);
+            info->app = strdup(utf8);
+        }
     }
 
     CFRelease(meta);
@@ -63,5 +174,10 @@ struct media_info *media_get_info(void) {
 }
 
 void media_free_info(struct media_info *info) {
-    if (info) free(info);
+    if (!info) return;
+    free(info->app);
+    free(info->title);
+    free(info->artist);
+    free(info->album);
+    free(info);
 }

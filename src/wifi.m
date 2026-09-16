@@ -1,39 +1,62 @@
 #include "wifi.h"
 #include "event.h"
 #include <CoreWLAN/CoreWLAN.h>
-#include <objc/runtime.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#include <stdlib.h>
+#include <string.h>
 
-@interface OmabarWifiObserver : NSObject
-- (void)wifiDidChange:(NSNotification *)note;
-@end
+static void update_ssid(SCDynamicStoreRef store, CFArrayRef keys, void *info) {
+    (void)store; (void)keys; (void)info;
 
-@implementation OmabarWifiObserver
-- (void)wifiDidChange:(NSNotification *)note {
-    (void)note;
-    struct event event = { .type = EVENT_WIFI_CHANGED };
-    event_post(&event);
+    @autoreleasepool {
+        char *ssid = strdup(wifi_get_ssid() ? wifi_get_ssid() : "null");
+        struct event event = { .type = EVENT_WIFI_CHANGED, .data = ssid };
+        event_post(&event);
+    }
 }
-@end
 
-static NSObject *g_wifi_observer = NULL;
+static SCDynamicStoreRef g_wifi_store = NULL;
+static CFRunLoopSourceRef g_wifi_loop_source = NULL;
+
+void forced_network_event(void) {
+    update_ssid(NULL, NULL, NULL);
+}
 
 void wifi_begin(void) {
-    g_wifi_observer = [[OmabarWifiObserver alloc] init];
-    [[NSNotificationCenter defaultCenter] addObserver:g_wifi_observer
-            selector:@selector(wifiDidChange:)
-                name:@"com.apple.airport.wifinetworkchange"
-              object:nil];
+    if (g_wifi_store) return;
+
+    SCDynamicStoreContext context = { 0, NULL, NULL, NULL, NULL };
+    g_wifi_store = SCDynamicStoreCreate(NULL, CFSTR("network"),
+                                        update_ssid, &context);
+    if (!g_wifi_store) return;
+
+    const void *values[] = { CFSTR(".*/Network/Global/IPv4") };
+    CFArrayRef keys = CFArrayCreate(NULL, values, 1, &kCFTypeArrayCallBacks);
+    SCDynamicStoreSetNotificationKeys(g_wifi_store, NULL, keys);
+    CFRelease(keys);
+
+    g_wifi_loop_source =
+        SCDynamicStoreCreateRunLoopSource(NULL, g_wifi_store, 0);
+    if (g_wifi_loop_source)
+        CFRunLoopAddSource(CFRunLoopGetMain(), g_wifi_loop_source,
+                           kCFRunLoopCommonModes);
 }
 
 void wifi_end(void) {
-    if (g_wifi_observer) {
-        [[NSNotificationCenter defaultCenter] removeObserver:g_wifi_observer];
-        g_wifi_observer = NULL;
+    if (g_wifi_loop_source) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), g_wifi_loop_source,
+                              kCFRunLoopCommonModes);
+        CFRelease(g_wifi_loop_source);
+        g_wifi_loop_source = NULL;
+    }
+    if (g_wifi_store) {
+        CFRelease(g_wifi_store);
+        g_wifi_store = NULL;
     }
 }
 
 const char *wifi_get_ssid(void) {
-    CWInterface *interface = [CWInterface interface];
+    CWInterface *interface = [[CWWiFiClient sharedWiFiClient] interface];
     if (!interface) return NULL;
 
     NSString *ssid = interface.ssid;

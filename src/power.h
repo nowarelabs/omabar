@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+void forced_power_event(void);
 void power_begin(void);
 void power_end(void);
 int power_get_charge(void);

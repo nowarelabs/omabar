@@ -1,7 +1,34 @@
 #include "animation.h"
+#include "event.h"
 #include "misc/helpers.h"
 #include <QuartzCore/QuartzCore.h>
 #include <stdlib.h>
+
+/*
+ * Per-frame tick source: one CVDisplayLink posts a SCROLL_TICK event
+ * every display refresh (~60 fps on the active CG displays). Items with
+ * a nonzero update_interval accumulate a counter and refresh every
+ * `update_interval` frames (e.g. 60 => once per second for a clock).
+ */
+static CVReturn animation_frame_callback(CVDisplayLinkRef display_link,
+                                         const CVTimeStamp *now,
+                                         const CVTimeStamp *output_time,
+                                         CVOptionFlags flags,
+                                         CVOptionFlags *flags_out,
+                                         void *context) {
+    (void)display_link; (void)now; (void)flags; (void)flags_out;
+    uint64_t host_time = output_time->hostTime;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        struct event event = {
+            .type = EVENT_SCROLL_TICK,
+            .arg1 = host_time
+        };
+        event_post(&event);
+        (void)context;
+    });
+    return kCVReturnSuccess;
+}
 
 static double animation_get_weight(enum animation_function fn, double t) {
     switch (fn) {
@@ -38,16 +65,34 @@ void animation_init(struct animator *animator) {
     memset(animator, 0, sizeof(*animator));
 }
 
+void animation_begin(struct animator *animator) {
+    if (animator->display_link) return;
+
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    CVDisplayLinkRef link = NULL;
+    if (CVDisplayLinkCreateWithActiveCGDisplays(&link) != kCVReturnSuccess)
+        return;
+
+    CVDisplayLinkSetOutputCallback(link, animation_frame_callback, animator);
+    CVDisplayLinkStart(link);
+    #pragma clang diagnostic pop
+    animator->display_link = link;
+}
+
 void animation_destroy(struct animator *animator) {
     if (animator->display_link) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         CVDisplayLinkStop(animator->display_link);
         CVDisplayLinkRelease(animator->display_link);
+        #pragma clang diagnostic pop
         animator->display_link = NULL;
     }
     if (animator->animations) {
-        for (int i = 0; i < animator->animation_count; i++)
+        for (size_t i = 0; i < buf_len(animator->animations); i++)
             free(animator->animations[i]);
-        free(animator->animations);
+        buf_free(animator->animations);
         animator->animations = NULL;
         animator->animation_count = 0;
     }
@@ -56,6 +101,7 @@ void animation_destroy(struct animator *animator) {
 void animation_run(struct animator *animator, struct animation *animation) {
     if (!animator || !animation) return;
     buf_push(animator->animations, animation);
+    animator->animation_count = buf_len(animator->animations);
     animation->started_at = CACurrentMediaTime();
 }
 
@@ -63,9 +109,8 @@ void animation_cancel(struct animator *animator, struct animation *animation) {
     if (!animator || !animation) return;
     for (int i = 0; i < animator->animation_count; i++) {
         if (animator->animations[i] == animation) {
-            memmove(&animator->animations[i], &animator->animations[i + 1],
-                    (animator->animation_count - i - 1) * sizeof(struct animation *));
-            animator->animation_count--;
+            buf_del(animator->animations, i);
+            animator->animation_count = buf_len(animator->animations);
             return;
         }
     }

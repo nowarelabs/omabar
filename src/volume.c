@@ -3,39 +3,195 @@
 #include <CoreAudio/CoreAudio.h>
 #include <stdlib.h>
 
-static AudioObjectPropertyAddress g_address = {
-    kAudioDevicePropertyVolumeScalar,
-    kAudioDevicePropertyScopeOutput,
+static AudioObjectPropertyAddress kHardwareDevicePropertyAddress = {
+    kAudioHardwarePropertyDefaultOutputDevice,
+    kAudioObjectPropertyScopeGlobal,
     kAudioObjectPropertyElementMain
 };
 
-static OSStatus volume_listener(AudioObjectID in_object_id,
-                                UInt32 in_num_addresses,
-                                const AudioObjectPropertyAddress *in_addresses,
-                                void *in_client_data) {
-    (void)in_object_id; (void)in_num_addresses; (void)in_addresses; (void)in_client_data;
+static AudioObjectPropertyAddress kVolumeMainPropertyAddress = {
+    kAudioDevicePropertyVolumeScalar,
+    kAudioObjectPropertyScopeOutput,
+    kAudioObjectPropertyElementMain
+};
 
-    struct event event = { .type = EVENT_VOLUME_CHANGED };
-    event_post(&event);
-    return noErr;
+static AudioObjectPropertyAddress kVolumeLeftPropertyAddress = {
+    kAudioDevicePropertyVolumeScalar,
+    kAudioObjectPropertyScopeOutput,
+    1
+};
+
+static AudioObjectPropertyAddress kMuteMainPropertyAddress = {
+    kAudioDevicePropertyMute,
+    kAudioObjectPropertyScopeOutput,
+    kAudioObjectPropertyElementMain
+};
+
+static AudioObjectPropertyAddress kMuteLeftPropertyAddress = {
+    kAudioDevicePropertyMute,
+    kAudioObjectPropertyScopeOutput,
+    1
+};
+
+static float g_last_volume = -1.0f;
+
+static OSStatus handler(AudioObjectID id, uint32_t address_count,
+                        const AudioObjectPropertyAddress *addresses,
+                        void *context) {
+    (void)address_count; (void)addresses; (void)context;
+
+    float volume = 0.0f;
+
+    uint32_t muted_main = 0;
+    uint32_t size = sizeof(muted_main);
+    AudioObjectGetPropertyData(id, &kMuteMainPropertyAddress, 0, NULL,
+                               &size, &muted_main);
+
+    uint32_t muted_left = 0;
+    size = sizeof(muted_left);
+    AudioObjectGetPropertyData(id, &kMuteLeftPropertyAddress, 0, NULL,
+                               &size, &muted_left);
+
+    size = sizeof(float);
+    float volume_main = 0.0f;
+    AudioObjectGetPropertyData(id, &kVolumeMainPropertyAddress, 0, NULL,
+                               &size, &volume_main);
+
+    size = sizeof(float);
+    float volume_left = 0.0f;
+    AudioObjectGetPropertyData(id, &kVolumeLeftPropertyAddress, 0, NULL,
+                               &size, &volume_left);
+
+    if (volume_left > 0.0f) {
+        volume = (muted_left || muted_main) ? 0.0f : volume_left;
+    } else {
+        volume = muted_main ? 0.0f : volume_main;
+    }
+
+    if (volume > g_last_volume + 1e-2f || volume < g_last_volume - 1e-2f) {
+        g_last_volume = volume;
+        int percentage = (int)(volume * 100.0f);
+        struct event event = {
+            .type = EVENT_VOLUME_CHANGED,
+            .arg1 = (uint64_t)(uint32_t)percentage
+        };
+        event_post(&event);
+    }
+
+    return KERN_SUCCESS;
 }
 
+static AudioObjectID g_audio_id = 0;
+
+static OSStatus device_changed(AudioObjectID id, uint32_t address_count,
+                               const AudioObjectPropertyAddress *addresses,
+                               void *context) {
+    (void)addresses;
+
+    AudioObjectID new_id = 0;
+    uint32_t size = sizeof(AudioObjectID);
+    AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                               &kHardwareDevicePropertyAddress, 0, NULL,
+                               &size, &new_id);
+
+    if (g_audio_id) {
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kMuteMainPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kMuteLeftPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kVolumeMainPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kVolumeLeftPropertyAddress,
+                                          handler, NULL);
+    }
+
+    AudioObjectAddPropertyListener(new_id, &kMuteMainPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(new_id, &kMuteLeftPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(new_id, &kVolumeMainPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(new_id, &kVolumeLeftPropertyAddress,
+                                   handler, NULL);
+
+    g_last_volume = -1.0f;
+    g_audio_id = new_id;
+
+    handler(g_audio_id, address_count, addresses, context);
+    return KERN_SUCCESS;
+}
+
+void forced_volume_event(void) {
+    g_last_volume = -1.0f;
+    handler(g_audio_id, 0, NULL, NULL);
+}
+
+static bool g_volume_events = false;
+
 void volume_begin(void) {
-    AudioObjectAddPropertyListener(kAudioObjectSystemObject, &g_address,
-                                   volume_listener, NULL);
+    if (g_volume_events) return;
+    g_volume_events = true;
+
+    AudioObjectID id = 0;
+    uint32_t size = sizeof(AudioObjectID);
+    AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                               &kHardwareDevicePropertyAddress, 0, NULL,
+                               &size, &id);
+
+    g_audio_id = id;
+
+    AudioObjectAddPropertyListener(id, &kMuteLeftPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(id, &kMuteMainPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(id, &kVolumeLeftPropertyAddress,
+                                   handler, NULL);
+    AudioObjectAddPropertyListener(id, &kVolumeMainPropertyAddress,
+                                   handler, NULL);
+
+    AudioObjectAddPropertyListener(kAudioObjectSystemObject,
+                                   &kHardwareDevicePropertyAddress,
+                                   device_changed, NULL);
 }
 
 void volume_end(void) {
-    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &g_address,
-                                      volume_listener, NULL);
+    if (g_audio_id) {
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kMuteMainPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kMuteLeftPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kVolumeMainPropertyAddress,
+                                          handler, NULL);
+        AudioObjectRemovePropertyListener(g_audio_id,
+                                          &kVolumeLeftPropertyAddress,
+                                          handler, NULL);
+        g_audio_id = 0;
+    }
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject,
+                                      &kHardwareDevicePropertyAddress,
+                                      device_changed, NULL);
 }
 
+static int g_percentage_cache = -1;
+
 int volume_get_percentage(void) {
-    Float32 volume = 0;
-    UInt32 size = sizeof(volume);
-    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
-                                                 &g_address, 0, NULL,
-                                                 &size, &volume);
-    if (status != noErr) return 0;
-    return (int)(volume * 100);
+    if (g_audio_id) {
+        Float32 volume = 0.0f;
+        UInt32 size = sizeof(volume);
+        OSStatus status = AudioObjectGetPropertyData(g_audio_id,
+                                                     &kVolumeMainPropertyAddress,
+                                                     0, NULL, &size, &volume);
+        if (status == noErr) {
+            g_percentage_cache = (int)(volume * 100.0f);
+            return g_percentage_cache;
+        }
+    }
+    return g_percentage_cache > 0 ? g_percentage_cache : 0;
 }

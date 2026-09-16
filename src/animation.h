@@ -40,6 +40,7 @@ struct animator {
 };
 
 void animation_init(struct animator *animator);
+void animation_begin(struct animator *animator);
 void animation_destroy(struct animator *animator);
 void animation_run(struct animator *animator, struct animation *animation);
 void animation_cancel(struct animator *animator, struct animation *animation);

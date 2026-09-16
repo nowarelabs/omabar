@@ -45,11 +45,16 @@ void bar_manager_init(struct bar_manager *bm);
 void bar_manager_begin(struct bar_manager *bm);
 void bar_manager_destroy(struct bar_manager *bm);
 void bar_manager_refresh(struct bar_manager *bm);
+void bar_manager_set_needs_update(struct bar_manager *bm);
+void bar_manager_set_needs_resize(struct bar_manager *bm);
 
 /* item management */
 int  bar_manager_add_item(struct bar_manager *bm, struct bar_item *item);
 void bar_manager_remove_item(struct bar_manager *bm, const char *name);
 void bar_manager_move_item(struct bar_manager *bm, const char *name, const char *ref, const char *position);
+void bar_manager_reorder_item(struct bar_manager *bm, const char *name, int new_index);
+void bar_manager_clone_item(struct bar_manager *bm, const char *name);
+void bar_manager_rename_item(struct bar_manager *bm, const char *old_name, const char *new_name);
 
 /* property setters */
 void bar_manager_set_position(struct bar_manager *bm, int position);
@@ -64,5 +69,6 @@ void bar_manager_set_notch_width(struct bar_manager *bm, int width);
 void bar_manager_set_notch_offset(struct bar_manager *bm, int offset);
 void bar_manager_set_y_offset(struct bar_manager *bm, int offset);
 void bar_manager_set_alpha(struct bar_manager *bm, double alpha);
+void bar_manager_set_background_color(struct bar_manager *bm, struct color color);
 
 #endif

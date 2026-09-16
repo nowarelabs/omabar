@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/file.h>
+#include <sys/wait.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -567,9 +568,12 @@ static inline void table_free(struct table *table) {
         free(table->buckets);
         table->buckets = NULL;
     }
+    table->count = 0;
+    table->capacity = 0;
 }
 
 static inline struct bucket **table_get_bucket(struct table *table, void *key) {
+    if (!table->buckets || table->capacity == 0) return NULL;
     struct bucket **bucket = table->buckets + (table->hash(key) % table->capacity);
     while (*bucket) {
         if (table->cmp((*bucket)->key, key)) {
@@ -612,6 +616,7 @@ static inline void table_rehash(struct table *table) {
 static inline void _table_add(struct table *table, void *key, int key_size,
                               void *value) {
     struct bucket **bucket = table_get_bucket(table, key);
+    if (!bucket) return;
     if (*bucket) {
         if (!(*bucket)->value) {
             (*bucket)->value = value;
@@ -634,19 +639,21 @@ static inline void _table_add(struct table *table, void *key, int key_size,
 }
 
 static inline void table_remove(struct table *table, void *key) {
-    struct bucket *next, **bucket = table_get_bucket(table, key);
-    if (*bucket) {
-        free((*bucket)->key);
-        next = (*bucket)->next;
-        free(*bucket);
+    struct bucket **bucket = table_get_bucket(table, key);
+    if (!bucket) return;
+    struct bucket *next, *to_free = *bucket;
+    if (to_free) {
+        free(to_free->key);
+        next = to_free->next;
+        free(to_free);
         *bucket = next;
         --table->count;
     }
 }
 
 static inline void *table_find(struct table *table, void *key) {
-    struct bucket *bucket = *table_get_bucket(table, key);
-    return bucket ? bucket->value : NULL;
+    struct bucket **bucket = table_get_bucket(table, key);
+    return (bucket && *bucket) ? (*bucket)->value : NULL;
 }
 
 /* ────────────────────────────────────────────────────────────────
@@ -677,6 +684,57 @@ static inline bool fork_exec(char *command, struct env_vars *env_vars) {
 
     alarm(FORK_TIMEOUT);
     exit(sync_exec(command, env_vars));
+}
+
+/* Same as fork_exec but captures the child's stdout. `out` receives a
+   caller-owned NUL-terminated buffer ("" on empty output). Returns false
+   only when the pipe/fork setup fails. */
+static inline bool fork_exec_output(char *command, struct env_vars *env_vars,
+                                    char **out) {
+    if (!out) return false;
+    *out = strdup("");
+
+    int pipe_out[2];
+    if (pipe(pipe_out) == -1) return false;
+
+    int pid = vfork();
+    if (pid == -1) {
+        close(pipe_out[0]);
+        close(pipe_out[1]);
+        return false;
+    }
+    if (pid == 0) {
+        close(pipe_out[0]);
+        dup2(pipe_out[1], STDOUT_FILENO);
+        close(pipe_out[1]);
+        alarm(FORK_TIMEOUT);
+        exit(sync_exec(command, env_vars) ? 0 : 1);
+        /* NOTREACHED */
+    }
+    close(pipe_out[1]);
+
+    size_t capacity = 4096, length = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) return false;
+
+    ssize_t n;
+    while ((n = read(pipe_out[0], buffer + length, capacity - length - 1)) > 0) {
+        length += (size_t)n;
+        if (length >= capacity - 1) {
+            capacity *= 2;
+            buffer = realloc(buffer, capacity);
+            if (!buffer) return false;
+        }
+    }
+    close(pipe_out[0]);
+    buffer[length] = '\0';
+
+    int status;
+    while (waitpid(pid, &status, 0) == -1) { /* EINTR retry */ }
+
+    free(*out);
+    *out = buffer;
+    return true;
 }
 #pragma clang diagnostic pop
 

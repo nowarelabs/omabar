@@ -13,6 +13,7 @@ void custom_events_init(struct custom_events *ce) {
         "media_changed", "front_app_switched", "space_changed",
         "display_added", "display_removed", "display_moved",
         "window_focused", "scroll.tick", "animate", "daemon_message",
+        "dnd",
         NULL
     };
 

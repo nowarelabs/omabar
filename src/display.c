@@ -211,8 +211,74 @@ void display_observe(int *did) {
     display_begin();
 }
 
+static float g_last_brightness = -1.0f;
+
+static uint32_t display_active_display_id(void) {
+    uint32_t displays[MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(MAX_DISPLAYS, displays, &count)
+        != kCGErrorSuccess || count == 0)
+        return 0;
+    return displays[0];
+}
+
+static void brightness_handler(void *notification_center, uint32_t did,
+                               void *name, const void *sender,
+                               CFDictionaryRef info) {
+    (void)notification_center; (void)name; (void)sender; (void)info;
+
+    float brightness = 0.0f;
+    DisplayServicesGetBrightness(did, &brightness);
+    if (g_last_brightness < brightness - 1e-2f ||
+        g_last_brightness > brightness + 1e-2f) {
+        g_last_brightness = brightness;
+        struct event event = {
+            .type = EVENT_BRIGHTNESS_CHANGED,
+            .arg1 = (uint64_t)(uint32_t)(brightness * 100.0f),
+            .arg2 = (uint64_t)did
+        };
+        event_post(&event);
+    }
+}
+
+void forced_brightness_event(void) {
+    g_last_brightness = -1.0f;
+    brightness_handler(NULL, display_active_display_id(), NULL, NULL, NULL);
+}
+
+static bool g_brightness_events = false;
+
 void display_brightness_begin(void) {
+    if (g_brightness_events) return;
+    g_brightness_events = true;
+
+    uint32_t displays[MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(MAX_DISPLAYS, displays, &count)
+        != kCGErrorSuccess)
+        return;
+
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t did = displays[i];
+        if (DisplayServicesCanChangeBrightness(did)) {
+            DisplayServicesRegisterForBrightnessChangeNotifications(
+                did, did, (void *)brightness_handler);
+        }
+    }
 }
 
 void display_brightness_end(void) {
+    uint32_t displays[MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(MAX_DISPLAYS, displays, &count)
+        != kCGErrorSuccess)
+        return;
+
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t did = displays[i];
+        if (DisplayServicesCanChangeBrightness(did)) {
+            DisplayServicesUnregisterForBrightnessChangeNotifications(
+                did, did);
+        }
+    }
 }

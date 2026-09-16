@@ -1,62 +1,80 @@
 {
   description = "A macOS status bar configured entirely via Nix";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+
+    nix-darwin = {
+      url = "github:LnL7/nix-darwin";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachSystem [ "aarch64-darwin" "x86_64-darwin" ] (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in {
-        packages.omabar = pkgs.stdenv.mkDerivation {
-          pname = "omabar";
-          version = "0.1.0";
-          src = ./.;
-          buildInputs = with pkgs.darwin.apple_sdk.frameworks; [
-            Carbon
-            AppKit
-            QuartzCore
-            CoreAudio
-            CoreWLAN
-            CoreVideo
-            IOKit
-            CoreText
-            ImageIO
-            CoreServices
-          ] ++ (with pkgs; [
-            darwin.IOKit
-          ]);
-          buildPhase = ''
-            cd src && make -j4
-          '';
-          installPhase = ''
-            mkdir -p $out/bin
-            cp bin/omabar $out/bin/
-          '';
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nix-darwin,
+      ...
+    }:
+    let
+      forSystems =
+        systems: f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          let
+            pkgs = nixpkgs.legacyPackages.${system};
+          in
+          f { inherit pkgs system; }
+        );
+      supportedSystems = [
+        "aarch64-darwin"
+        "x86_64-darwin"
+      ];
+    in
+    {
+      packages = forSystems supportedSystems (
+        { pkgs, system }:
+        {
+          omabar = pkgs.callPackage ./nix/package.nix { src = self; };
+          default = pkgs.callPackage ./nix/package.nix { src = self; };
+        }
+      );
+
+      devShells = forSystems supportedSystems (
+        { pkgs, ... }:
+        {
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              clang
+              apple-sdk_15
+            ];
+          };
+        }
+      );
+
+      # nix-darwin module — exposes the omabar package via overlay so
+      # consumers only need services.omabar.enable = true; and the
+      # bar config declaratively.
+      nixosModules.omabar =
+        { config, lib, pkgs, ... }:
+        let
+          cfg = config.services.omabar;
+        in
+        {
+          imports = [ ./nix/module.nix ];
+
+          # Expose pkgs.omabar so module's launchd agent / plugins work
+          # without consumers manually applying the overlay.
+          nixpkgs.overlays = [ self.overlays.default ];
         };
 
-        defaultPackage = self.packages.${system}.omabar;
+      # alias used by some nix-darwin wiring
+      darwinModules.omabar = self.nixosModules.omabar;
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            clang
-          ] ++ (with pkgs.darwin.apple_sdk.frameworks; [
-            Carbon
-            AppKit
-            QuartzCore
-            CoreAudio
-            CoreWLAN
-            CoreVideo
-            IOKit
-            CoreText
-            ImageIO
-            CoreServices
-          ]);
-        };
-      }
-    );
-
-  nixosModules.omabar = import ./nix/module.nix;
+      overlays.default = final: prev: {
+        omabar = final.callPackage ./nix/package.nix { src = self; };
+      };
+      overlays.omabar = self.overlays.default;
+    };
 }

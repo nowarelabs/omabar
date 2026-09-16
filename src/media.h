@@ -4,12 +4,14 @@
 #include <stdbool.h>
 
 struct media_info {
+    char *app;
     char *title;
     char *artist;
     char *album;
     bool playing;
 };
 
+void forced_media_event(void);
 void media_begin(void);
 void media_end(void);
 struct media_info *media_get_info(void);

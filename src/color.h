@@ -1,6 +1,7 @@
 #ifndef OMABAR_COLOR_H
 #define OMABAR_COLOR_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 struct color {
@@ -10,6 +11,10 @@ struct color {
     float b;
     float a;
 };
+
+static inline bool color_equal(struct color c1, struct color c2) {
+    return c1.r == c2.r && c1.g == c2.g && c1.b == c2.b && c1.a == c2.a;
+}
 
 #define color_make_uint32(c) \
     (((uint32_t)((c).a * 255.0f)) << 24) | \
@@ -21,7 +26,7 @@ struct color {
 #define color_is_clear(c) ((c).a <= 0.0f)
 
 static inline struct color color_calloc(void) {
-    struct color c = { .is_valid = 1, .r = 0, .g = 0, .b = 0, .a = 0 };
+    struct color c = { .r = 0, .g = 0, .b = 0, .a = 0 };
     return c;
 }
 

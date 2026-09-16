@@ -17,6 +17,7 @@ bool display_has_notch(CGDirectDisplayID did);
 CGRect display_safe_area(CGDirectDisplayID did);
 
 /* brightness */
+void forced_brightness_event(void);
 void display_brightness_begin(void);
 void display_brightness_end(void);
 

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+void forced_network_event(void);
 void wifi_begin(void);
 void wifi_end(void);
 const char *wifi_get_ssid(void);
