@@ -8,8 +8,7 @@
 extern struct bar_manager g_bar_manager;
 
 CGRect bar_get_frame(struct bar *bar) {
-    bool is_builtin = CGDisplayIsBuiltin(bar->did);
-    int notch_offset = is_builtin ? g_bar_manager.notch_offset : 0;
+    int bar_notch_offset = display_has_notch(bar->did) ? g_bar_manager.notch_offset : 0;
 
     CGRect bounds = display_bounds(bar->did);
     CGPoint origin = bounds.origin;
@@ -32,13 +31,13 @@ CGRect bar_get_frame(struct bar *bar) {
 
     bounds.size.width -= 2 * g_bar_manager.margin;
     origin.x += g_bar_manager.margin;
-    origin.y += g_bar_manager.y_offset + notch_offset;
+    origin.y += g_bar_manager.y_offset + bar_notch_offset;
 
     if (g_bar_manager.position == 1 /* bottom */) {
         origin.y = CGRectGetMaxY(bounds)
                    - g_bar_manager.height
                    - 2 * g_bar_manager.y_offset
-                   - notch_offset;
+                   - bar_notch_offset;
     }
 
     return CGRectMake(origin.x, origin.y, bounds.size.width, g_bar_manager.height);
@@ -119,12 +118,58 @@ void bar_destroy_for_display(struct bar_manager *bm, unsigned int did) {
     }
 }
 
+/* Whether this item is visible on the bar for a given display.
+   associated_display is a bitmask over display arrangement ids
+   (bit N set => shown on display arrangement N); 0 = all displays.
+   associated_space is the same for spaces (bit N => current space N),
+   checked only for non-space items since space components render one
+   chip per space themselves. */
+bool bar_draws_item(struct bar *bar, struct bar_item *bar_item) {
+    if (!bar_item || !bar || bar_item->hidden) return false;
+    if (!bar->shown || bar->hidden) return false;
+
+    if (bar_item->associated_display > 0
+        && !(bar_item->associated_display & (1 << bar->adid)))
+        return false;
+
+    if (bar_item->type != BAR_COMPONENT_SPACE
+        && bar_item->associated_space > 0
+        && !(bar_item->associated_space & (1 << bar->sid)))
+        return false;
+
+    if (bar_item->position == POSITION_POPUP)
+        return false;
+
+    return true;
+}
+
+/* Update space components associated with this bar to reflect the bar's
+   current space: exactly one chip is selected and the rest are not. */
+void bar_sync_space_items(struct bar *bar) {
+    if (!bar) return;
+    struct bar_manager *bm = &g_bar_manager;
+    for (int i = 0; i < bm->bar_item_count; i++) {
+        struct bar_item *item = bm->bar_items[i];
+        if (!item || item->type != BAR_COMPONENT_SPACE) continue;
+        if (item->associated_display > 0
+            && !(item->associated_display & (1 << bar->adid)))
+            continue;
+        bar_item_set_selected(item, item->space_id == bar->sid);
+    }
+}
+
 void bar_calculate_bounds(struct bar *bar) {
     if (!bar) return;
     if (bar->adid < 1) return;
 
-    bool is_builtin = CGDisplayIsBuiltin(bar->did);
-    uint32_t notch_width = is_builtin ? (uint32_t)g_bar_manager.notch_width : 0;
+    bool has_notch = display_has_notch(bar->did);
+    uint32_t notch_width = has_notch ? (uint32_t)g_bar_manager.notch_width : 0;
+
+    /* when the bar is drawn around a notch but the user hasn't overridden
+       the width, derive it from the display geometry so center-split items
+       avoid the camera housing automatically */
+    if (has_notch && notch_width == 0)
+        notch_width = display_notch_width(bar->did);
 
     int bar_w = (int)bar->window->frame.size.width;
     int bar_h = (int)bar->window->frame.size.height;
@@ -142,7 +187,7 @@ void bar_calculate_bounds(struct bar *bar) {
     int center_total = 0;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
-        if (!item || item->hidden) continue;
+        if (!item || !bar_draws_item(bar, item)) continue;
         bar_item_calculate_bounds(item);
         int len = (int)bar_item_get_length(item);
         if (item->position == POSITION_CENTER)
@@ -154,7 +199,7 @@ void bar_calculate_bounds(struct bar *bar) {
 
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
-        if (!item || item->hidden) continue;
+        if (!item || !bar_draws_item(bar, item)) continue;
         if (item->position == POSITION_POPUP) continue;
 
         bar_item_calculate_bounds(item);
@@ -208,7 +253,7 @@ void bar_draw(struct bar *bar) {
     struct bar_manager *bm = &g_bar_manager;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
-        if (!item || item->hidden) continue;
+        if (!item || !bar_draws_item(bar, item)) continue;
 
         /* save, translate to item's slot, draw, restore */
         CGContextSaveGState(ctx);

@@ -37,6 +37,7 @@
         { pkgs, system }:
         {
           omabar = pkgs.callPackage ./nix/package.nix { src = self; };
+          omabar-plugin-sdk = pkgs.callPackage ./nix/plugin-sdk.nix { src = self; };
           default = pkgs.callPackage ./nix/package.nix { src = self; };
         }
       );
@@ -74,6 +75,7 @@
 
       overlays.default = final: prev: {
         omabar = final.callPackage ./nix/package.nix { src = self; };
+        omabar-plugin-sdk = final.callPackage ./nix/plugin-sdk.nix { src = self; };
       };
       overlays.omabar = self.overlays.default;
     };

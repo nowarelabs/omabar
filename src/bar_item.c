@@ -24,6 +24,7 @@ void bar_item_init(struct bar_item *item) {
     item->position = POSITION_LEFT;
     item->click_enabled = 1;
     item->scroll_enabled = 0;
+    item->scroll_sensitivity = 10.0f;
     item->padding_left = 2;
     item->padding_right = 2;
     item->update_mask = 0;
@@ -44,6 +45,7 @@ void bar_item_destroy(struct bar_item *item) {
     if (item->popup) popup_destroy(item->popup);
     free(item->script);
     free(item->click_script);
+    free(item->scroll_values);
     free(item->windows);
     for (int i = 0; i < item->icon_strip_count; i++) {
         free(item->icon_strip[i]);
@@ -139,6 +141,15 @@ struct bar_item *bar_item_clone(const struct bar_item *src) {
     dst->hidden = src->hidden;
     dst->click_enabled = src->click_enabled;
     dst->scroll_enabled = src->scroll_enabled;
+    dst->scroll_sensitivity = src->scroll_sensitivity;
+    if (src->scroll_values && src->scroll_value_count > 0) {
+        dst->scroll_values = malloc(sizeof(float) * (size_t)src->scroll_value_count);
+        if (dst->scroll_values)
+            memcpy(dst->scroll_values, src->scroll_values,
+                   sizeof(float) * (size_t)src->scroll_value_count);
+        dst->scroll_value_count = src->scroll_value_count;
+    }
+    dst->scroll_index = src->scroll_index;
     dst->y_offset = src->y_offset;
     dst->padding_left = src->padding_left;
     dst->padding_right = src->padding_right;
@@ -217,7 +228,8 @@ static struct env_vars bar_item_make_env(struct bar_item *item,
 
     if (item->associated_display) {
         char did[32];
-        snprintf(did, sizeof(did), "%u", item->associated_display);
+        snprintf(did, sizeof(did), "%u",
+                 get_set_bit_position(item->associated_display));
         env_vars_set(&env, "DID", did);
     }
 

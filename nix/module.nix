@@ -356,13 +356,19 @@ in
       notch_width = mkOption {
         type = types.int;
         default = 0;
-        description = "Notch width in points; 0 = no notch handling.";
+        description = ''
+          Notch width in points; 0 = auto-detect from the display when a
+          built-in notch is present, otherwise no notch handling.
+        '';
       };
 
       notch_offset = mkOption {
         type = types.int;
         default = 0;
-        description = "Notch offset from the left in points.";
+        description = ''
+          Vertical offset (points) pushed below the notch on built-in
+          displays when a notch is present.
+        '';
       };
 
       y_offset = mkOption {

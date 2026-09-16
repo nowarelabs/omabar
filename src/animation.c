@@ -109,9 +109,50 @@ void animation_cancel(struct animator *animator, struct animation *animation) {
     if (!animator || !animation) return;
     for (int i = 0; i < animator->animation_count; i++) {
         if (animator->animations[i] == animation) {
+            free(animator->animations[i]);
             buf_del(animator->animations, i);
             animator->animation_count = buf_len(animator->animations);
             return;
         }
     }
+}
+
+int animation_tick(struct animator *animator) {
+    if (!animator || animator->animation_count == 0) return 0;
+
+    double now = CACurrentMediaTime();
+    int remaining = 0;
+
+    for (int i = 0; i < animator->animation_count; i++) {
+        struct animation *a = animator->animations[i];
+        if (!a) continue;
+
+        double elapsed = now - a->started_at;
+        double t = a->duration > 0.0 ? elapsed / a->duration : 1.0;
+        if (t < 0.0) t = 0.0;
+        if (t > 1.0) t = 1.0;
+
+        float value = animation_interpolate(a->function, a->initial, a->final, t);
+        if (a->target) *(float *)a->target = value;
+
+        if (t >= 1.0) {
+            if (a->next) {
+                /* run the chained animation next: inherit the ending state */
+                a->next->initial = a->final;
+                a->next->started_at = now;
+                animator->animations[i] = a->next;
+                a->next = NULL;
+                free(a);
+                remaining = 1;
+                continue;
+            }
+            free(a);
+            buf_del(animator->animations, i);
+            i--;
+            animator->animation_count = buf_len(animator->animations);
+        } else {
+            remaining = 1;
+        }
+    }
+    return remaining;
 }

@@ -14,6 +14,7 @@ void display_observe(int *did);
 int display_begin(void);
 void display_end(void);
 bool display_has_notch(CGDirectDisplayID did);
+uint32_t display_notch_width(CGDirectDisplayID did);
 CGRect display_safe_area(CGDirectDisplayID did);
 
 /* brightness */

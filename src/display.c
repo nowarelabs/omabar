@@ -195,9 +195,31 @@ void display_end(void) {
 }
 
 bool display_has_notch(CGDirectDisplayID did) {
+    /* Primary detection: NSScreen.safeAreaInsets.top > 0 indicates a
+       MacBook with a camera notch (menu bar + notch area). */
+    double top = display_nsscreen_top_inset(did);
+    if (top > 0.0) return true;
+
+    /* Fallback for environments where NSScreen lookup fails: use known
+       display widths that correspond to notched MacBook panels. */
     CGRect bounds = CGDisplayBounds(did);
-    return (int)bounds.size.width == 1512 || (int)bounds.size.width == 1728 ||
-           (int)bounds.size.width == 2560 || (int)bounds.size.width == 3024;
+    int w = (int)bounds.size.width;
+    return w == 1512 || w == 1728 || w == 2560 || w == 3024;
+}
+
+uint32_t display_notch_width(CGDirectDisplayID did) {
+    if (!display_has_notch(did)) return 0;
+
+    CGRect bounds = CGDisplayBounds(did);
+    int w = (int)bounds.size.width;
+
+    /* Known notch widths for supported MacBook panels (in pts). */
+    if (w == 1512) return 170;   /* 14" scaled */
+    if (w == 1728) return 180;   /* 14" more space */
+    if (w == 2560) return 200;   /* 16" scaled */
+    if (w == 3024) return 210;   /* 16" native */
+
+    return 200;  /* conservative default for unknown notch displays */
 }
 
 CGRect display_safe_area(CGDirectDisplayID did) {

@@ -99,6 +99,13 @@ struct bar_item {
     int index;
     double x;
     uint64_t tick_counter;   /* frames since last "routine" update */
+
+    /* scroll animation state */
+    float scroll_offset;     /* visual displacement driven by scroll animation */
+    float scroll_sensitivity; /* pixels per scroll delta unit; 0 = disabled */
+    float *scroll_values;    /* array of target values to cycle through on scroll */
+    int scroll_value_count;  /* number of entries in scroll_values */
+    int scroll_index;        /* current position in scroll_values */
 };
 
 void bar_item_init(struct bar_item *item);

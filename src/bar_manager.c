@@ -5,6 +5,8 @@
 #include "event.h"
 #include "workspace.h"
 #include "dnd.h"
+#include "ipc.h"
+#include "plugin.h"
 #include "misc/helpers.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <stdio.h>
@@ -47,7 +49,8 @@ static void bar_manager_handle_display(const struct event *event) {
     }
 }
 
-/* iterate items matching a mask, run their script updates */
+/* iterate items matching a mask, run their script updates, and fan the
+   event out to plugins subscribed to the same mask */
 static void bar_manager_update_items(uint64_t mask, const char *sender) {
     struct bar_manager *bm = &g_bar_manager;
     for (int i = 0; i < bm->bar_item_count; i++) {
@@ -55,6 +58,7 @@ static void bar_manager_update_items(uint64_t mask, const char *sender) {
         if (item && (item->update_mask & mask))
             bar_item_update(item, sender, NULL);
     }
+    plugin_notify(mask, sender, NULL);
 }
 
 static void bar_manager_handle_space_changed(const struct event *event) {
@@ -68,6 +72,7 @@ static void bar_manager_handle_space_changed(const struct event *event) {
         uint64_t new_sid = sid ? sid : display_space_id(bar->did);
         if (new_sid) bar->sid = new_sid;
         bar->dsid = display_space_display_id(bar->sid);
+        bar_sync_space_items(bar);
     }
     bar_manager_update_items(UPDATE_SPACE_CHANGED, "space_changed");
     bm->bar_needs_update = 1;
@@ -127,6 +132,7 @@ static void bar_manager_handle_custom_event(const struct event *event) {
         if (item && (item->update_mask & mask))
             bar_item_update(item, (const char *)event->data, NULL);
     }
+    plugin_notify(mask, (const char *)event->data, NULL);
     bar_manager_set_needs_update(bm);
 }
 
@@ -141,10 +147,14 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
     (void)event;
     struct bar_manager *bm = &g_bar_manager;
 
+    /* advance any running animations (scroll scrub, transitions, etc.) */
+    int animating = animation_tick(&bm->animator);
+
     /* re-read DND state once per second (60 ticks) */
     if (++g_tick_dnd_counter >= 60) {
         g_tick_dnd_counter = 0;
         dnd_update();
+        plugin_health_check();
     }
 
     for (int i = 0; i < bm->bar_item_count; i++) {
@@ -180,7 +190,7 @@ static struct bar_item *bar_manager_item_at(struct bar *bar, CGPoint point) {
     double local_x = point.x - bar->window->origin.x;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
-        if (!item || item->hidden) continue;
+        if (!item || !bar_draws_item(bar, item)) continue;
         if (local_x >= item->x
             && local_x <= item->x + bar_item_get_length(item))
             return item;
@@ -230,6 +240,100 @@ static void bar_manager_handle_mouse_clicked(const struct event *event) {
     struct bar_item *item = bar_manager_item_at(bar, *point);
     if (!item) return;
     bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, *point);
+    bar_manager_set_needs_update(bm);
+}
+
+static struct bar_item *bar_manager_find_item(struct bar_manager *bm, const char *name);
+static void bar_manager_handle_daemon_message(const struct event *event) {
+    struct bar_manager *bm = &g_bar_manager;
+    if (!event || !event->data) return;
+
+    struct ipc_message *msg = (struct ipc_message *)event->data;
+
+    if (msg->status == IPC_MSG_UNKNOWN) {
+        char *reply = ipc_make_reply(false, msg->error[0] ? msg->error : NULL);
+        if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+        ipc_message_free(msg);
+        return;
+    }
+
+    switch (msg->type) {
+        case IPC_MSG_REGISTER: {
+            plugin_register(msg->name, (int)msg->client_fd);
+            char *reply = ipc_make_reply(true, NULL);
+            if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+            break;
+        }
+        case IPC_MSG_UPDATE: {
+            struct bar_item *item = bar_manager_find_item(bm, msg->item);
+            if (!item) {
+                char err[256];
+                snprintf(err, sizeof(err), "no such item '%s'", msg->item);
+                char *reply = ipc_make_reply(false, err);
+                if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+            } else {
+                if (msg->icon) bar_item_set_icon(item, msg->icon);
+                if (msg->label) bar_item_set_label(item, msg->label);
+                if (msg->background_color && *msg->background_color)
+                    bar_item_set_background_color(item,
+                        color_from_hex_string(msg->background_color));
+                char *reply = ipc_make_reply(true, NULL);
+                if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+            }
+            break;
+        }
+        case IPC_MSG_SUBSCRIBE: {
+            uint64_t mask = 0;
+            for (int i = 0; i < msg->event_count; i++)
+                mask |= custom_events_get_mask(&bm->custom_events, msg->events[i]);
+            plugin_subscribe((int)msg->client_fd, mask);
+            char *reply = ipc_make_reply(true, NULL);
+            if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+            break;
+        }
+        case IPC_MSG_QUERY: {
+            struct bar_item *item = bar_manager_find_item(bm, msg->item);
+            if (!item) {
+                char err[256];
+                snprintf(err, sizeof(err), "no such item '%s'", msg->item);
+                char *reply = ipc_make_reply(false, err);
+                if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+                break;
+            }
+            char *icon = item->icon.string ? escape_string(item->icon.string) : NULL;
+            char *label = item->label.string ? escape_string(item->label.string) : NULL;
+            uint32_t bg = color_make_uint32(item->background.color);
+            char *reply = malloc(512);
+            if (reply) {
+                snprintf(reply, 512,
+                         "{\"ok\":true,\"item\":\"%s\",\"icon\":\"%s\","
+                         "\"label\":\"%s\",\"background_color\":\"0x%08x\"}",
+                         msg->item,
+                         icon ? icon : "",
+                         label ? label : "",
+                         bg);
+                ipc_send_json((int)msg->client_fd, reply);
+            }
+            free(reply);
+            free(icon);
+            free(label);
+            break;
+        }
+        case IPC_MSG_TRIGGER: {
+            struct event custom = {
+                .type = EVENT_CUSTOM,
+                .data = msg->event,
+            };
+            bar_manager_handle_custom_event(&custom);
+            char *reply = ipc_make_reply(true, NULL);
+            if (reply) { ipc_send_json((int)msg->client_fd, reply); free(reply); }
+            break;
+        }
+        default:
+            break;
+    }
+
+    ipc_message_free(msg);
     bar_manager_set_needs_update(bm);
 }
 
@@ -287,10 +391,15 @@ void bar_manager_begin(struct bar_manager *bm) {
     g_event_handler[EVENT_MOUSE_SCROLLED] = bar_manager_handle_mouse_scrolled;
     g_event_handler[EVENT_MOUSE_CLICKED] = bar_manager_handle_mouse_clicked;
 
+    g_event_handler[EVENT_DAEMON_MESSAGE] = bar_manager_handle_daemon_message;
+
     display_begin();
     workspace_event_handler_begin();
     animation_begin(&bm->animator);
     dnd_init();
+
+    plugin_init();
+    socket_daemon_begin_un();
 
     /* create a bar for every active display */
     uint32_t count = 0;
@@ -306,6 +415,9 @@ void bar_manager_begin(struct bar_manager *bm) {
 }
 
 void bar_manager_destroy(struct bar_manager *bm) {
+    socket_daemon_end();
+    plugin_destroy();
+
     for (int i = 0; i < bm->bar_count; i++)
         bar_destroy(bm->bars[i]);
     buf_free(bm->bars);

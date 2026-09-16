@@ -27,7 +27,7 @@ _C_SRC := main.c event_loop.c event.c bar_manager.c bar.c bar_item.c \
           window.c surface.c context.c text.c font.c color.c \
           background.c shadow.c image.c graph.c alias.c slider.c \
           group.c popup.c animation.c mouse.c display.c \
-          volume.c power.c custom_events.c ipc.c plugin.c \
+          volume.c power.c custom_events.c ipc.c ipc_client.c plugin.c \
           hotload.c private_shim.c workspace.m display_nsscreen.m \
           media.m wifi.m app_windows.m mach.c dnd.c
 
@@ -35,7 +35,7 @@ _OBJ := main.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
         window.o surface.o context.o text.o font.o color.o \
         background.o shadow.o image.o graph.o alias.o slider.o \
         group.o popup.o animation.o mouse.o display.o \
-        volume.o power.o custom_events.o ipc.o plugin.o \
+        volume.o power.o custom_events.o ipc.o ipc_client.o plugin.o \
         hotload.o private_shim.o app_windows.o workspace.o \
         display_nsscreen.o layer.o media.o wifi.o mach.o dnd.o
 

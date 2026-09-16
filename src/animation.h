@@ -31,6 +31,7 @@ struct animation {
     double started_at;
     struct color color_initial;
     struct color color_final;
+    struct animation *next; /* chained animation run on completion */
 };
 
 struct animator {
@@ -44,6 +45,7 @@ void animation_begin(struct animator *animator);
 void animation_destroy(struct animator *animator);
 void animation_run(struct animator *animator, struct animation *animation);
 void animation_cancel(struct animator *animator, struct animation *animation);
+int  animation_tick(struct animator *animator);
 float animation_interpolate(enum animation_function fn, float initial, float final, double t);
 
 #endif
