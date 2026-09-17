@@ -39,7 +39,7 @@ In your flake:
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
 
     omabar = {
-      url = "github:anomalyco/omabar";
+      url = "github:nowarelabs/omabar";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.nix-darwin.follows = "nix-darwin";
     };
@@ -70,34 +70,34 @@ and media items.
 
 ### Top-level options
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enable` | bool | false | Turn on the daemon + launchd agent. |
-| `theme` | path | `./default-theme.nix` | Importable theme expression; used as the seed defaults below. |
-| `bar.position` | enum | `"top"` | `top` / `bottom` / `left` / `right`. |
-| `bar.height` | int | 38 | Bar height in points. |
-| `bar.width` | int | 0 | Width in points; `0` = full screen. |
-| `bar.margin` | int | 0 | Margin from screen edges. |
-| `bar.blur_radius` | int | 30 | Background blur (0 = off). |
-| `bar.color` | hex string | `0x40000000` | Bar background, AARRGGBB. |
-| `bar.shadow` / `shadow_color` | bool / hex | true / `0x40000000` | Window shadow. |
-| `bar.topmost` / `sticky` | bool | true / true | Above other windows / all Spaces. |
-| `bar.notch_width` / `notch_offset` | int | 0 / 0 | Notch handling on built-in displays. |
-| `bar.y_offset` | int | 0 | Vertical offset. |
-| `bar.alpha` | float | 1.0 | Window opacity. |
-| `defaults.icon.*` / `defaults.label.*` | font + color | SF Pro Regular 13 / `0xfff2f4f8` | Default item font, color, highlight color. |
-| `defaults.background.*` | color/border/radius | transparent / `0x33ffffff` / 6 | Item background defaults. |
-| `defaults.padding_left/right` | int | 6 | Item padding defaults. |
-| `defaultItem` | barItem | `{ }` | Template applied to every item before per-item options. |
-| `items.left/right/center/center_left/center_right` | barItem attrs | theme sections | The bar sections. |
-| `components.clock/battery/volume/wifi/media/front_app` | submodule | disabled | One-line component shortcuts (see below). |
-| `animations.enable/duration/function` | bool/float/enum | false / 0.25 / `ease_out` | Item animation behavior. |
-| `daemon.hotload` / `log_level` / `pid_file` / `lock_file` | … | false / `info` / `/tmp/omabar.pid` / `/tmp/omabar.lock` | Daemon behavior. |
-| `fonts.packages` | list of pkg | `[ ]` | Fonts installed to `/Library/Fonts/Nix Fonts`. |
-| `fonts.default` | str | `"SF Pro:Regular:13.0"` | Fallback font string. |
-| `events.<name>«notification»` | submodule | `{ }` | Custom event registrations the daemon can subscribe to. |
-| `plugins.<name>«package,update_interval,env,enable»` | submodule | `{ }` | Plugin executables managed by the bar. |
-| `configFile` | path (read-only) | generated | Binary OMABC config produced for the daemon. |
+| Option                                                    | Type                | Default                                                 | Description                                                   |
+| --------------------------------------------------------- | ------------------- | ------------------------------------------------------- | ------------------------------------------------------------- |
+| `enable`                                                  | bool                | false                                                   | Turn on the daemon + launchd agent.                           |
+| `theme`                                                   | path                | `./default-theme.nix`                                   | Importable theme expression; used as the seed defaults below. |
+| `bar.position`                                            | enum                | `"top"`                                                 | `top` / `bottom` / `left` / `right`.                          |
+| `bar.height`                                              | int                 | 38                                                      | Bar height in points.                                         |
+| `bar.width`                                               | int                 | 0                                                       | Width in points; `0` = full screen.                           |
+| `bar.margin`                                              | int                 | 0                                                       | Margin from screen edges.                                     |
+| `bar.blur_radius`                                         | int                 | 30                                                      | Background blur (0 = off).                                    |
+| `bar.color`                                               | hex string          | `0x40000000`                                            | Bar background, AARRGGBB.                                     |
+| `bar.shadow` / `shadow_color`                             | bool / hex          | true / `0x40000000`                                     | Window shadow.                                                |
+| `bar.topmost` / `sticky`                                  | bool                | true / true                                             | Above other windows / all Spaces.                             |
+| `bar.notch_width` / `notch_offset`                        | int                 | 0 / 0                                                   | Notch handling on built-in displays.                          |
+| `bar.y_offset`                                            | int                 | 0                                                       | Vertical offset.                                              |
+| `bar.alpha`                                               | float               | 1.0                                                     | Window opacity.                                               |
+| `defaults.icon.*` / `defaults.label.*`                    | font + color        | SF Pro Regular 13 / `0xfff2f4f8`                        | Default item font, color, highlight color.                    |
+| `defaults.background.*`                                   | color/border/radius | transparent / `0x33ffffff` / 6                          | Item background defaults.                                     |
+| `defaults.padding_left/right`                             | int                 | 6                                                       | Item padding defaults.                                        |
+| `defaultItem`                                             | barItem             | `{ }`                                                   | Template applied to every item before per-item options.       |
+| `items.left/right/center/center_left/center_right`        | barItem attrs       | theme sections                                          | The bar sections.                                             |
+| `components.clock/battery/volume/wifi/media/front_app`    | submodule           | disabled                                                | One-line component shortcuts (see below).                     |
+| `animations.enable/duration/function`                     | bool/float/enum     | false / 0.25 / `ease_out`                               | Item animation behavior.                                      |
+| `daemon.hotload` / `log_level` / `pid_file` / `lock_file` | …                   | false / `info` / `/tmp/omabar.pid` / `/tmp/omabar.lock` | Daemon behavior.                                              |
+| `fonts.packages`                                          | list of pkg         | `[ ]`                                                   | Fonts installed to `/Library/Fonts/Nix Fonts`.                |
+| `fonts.default`                                           | str                 | `"SF Pro:Regular:13.0"`                                 | Fallback font string.                                         |
+| `events.<name>«notification»`                             | submodule           | `{ }`                                                   | Custom event registrations the daemon can subscribe to.       |
+| `plugins.<name>«package,update_interval,env,enable»`      | submodule           | `{ }`                                                   | Plugin executables managed by the bar.                        |
+| `configFile`                                              | path (read-only)    | generated                                               | Binary OMABC config produced for the daemon.                  |
 
 ### Bar items
 
@@ -111,28 +111,28 @@ An item is any attrset under `items.<section>`; each is typed by `type`:
 - `"clock"`, `"battery"`, `"volume"`, `"wifi"`, `"media"`, `"front_app"`,
   `"space"`, `"time"`, `"text"` (custom) — text/icon delegates.
 - `type = ""` with `script` — runs a shell script to render the item.
-- Alias and graph are *components* attached to any item (below).
+- Alias and graph are _components_ attached to any item (below).
 
 Item options:
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `position` | `l`/`r`/`c`/`q`/`cl`/`cr` | Where the item sits in its section. |
-| `type` | str | Component type (drives built-in rendering + event defaults). |
-| `icon.font` / `icon.color` / `icon.string` | … | Icon glyph + styling. |
-| `icon_strip` | list of str | Icon glyphs chosen by state (battery/volume/spaces). |
-| `icon_highlight_color` | str | Color for the active/highlighted strip glyph. |
-| `label.font` / `label.color` / `label.string` | … | Label text + styling. |
-| `background` / `selected_background` | color, border, corner_radius | Item backgrounds. |
-| `padding_left` / `padding_right` | int | Internal padding. |
-| `y_offset` / `icon_x_offset` / `label_x_offset` | int | Fine positioning. |
-| `update_interval` | int | Re-render every N ticks. |
-| `update_mask` | list of event names | Events that re-render the item. |
-| `associated_space` / `associated_display` | int | Scope the item to a Space/display (−1 = all). |
-| `script` | str | Shell command rendering custom text. |
-| `click_script` | str | Shell command run on click. |
-| `scroll_enabled` / `click_enabled` | bool | Input enablement. |
-| `mach_helper` | str | MACH helper bootstrap name (advanced). |
+| Option                                          | Type                         | Description                                                  |
+| ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| `position`                                      | `l`/`r`/`c`/`q`/`cl`/`cr`    | Where the item sits in its section.                          |
+| `type`                                          | str                          | Component type (drives built-in rendering + event defaults). |
+| `icon.font` / `icon.color` / `icon.string`      | …                            | Icon glyph + styling.                                        |
+| `icon_strip`                                    | list of str                  | Icon glyphs chosen by state (battery/volume/spaces).         |
+| `icon_highlight_color`                          | str                          | Color for the active/highlighted strip glyph.                |
+| `label.font` / `label.color` / `label.string`   | …                            | Label text + styling.                                        |
+| `background` / `selected_background`            | color, border, corner_radius | Item backgrounds.                                            |
+| `padding_left` / `padding_right`                | int                          | Internal padding.                                            |
+| `y_offset` / `icon_x_offset` / `label_x_offset` | int                          | Fine positioning.                                            |
+| `update_interval`                               | int                          | Re-render every N ticks.                                     |
+| `update_mask`                                   | list of event names          | Events that re-render the item.                              |
+| `associated_space` / `associated_display`       | int                          | Scope the item to a Space/display (−1 = all).                |
+| `script`                                        | str                          | Shell command rendering custom text.                         |
+| `click_script`                                  | str                          | Shell command run on click.                                  |
+| `scroll_enabled` / `click_enabled`              | bool                         | Input enablement.                                            |
+| `mach_helper`                                   | str                          | MACH helper bootstrap name (advanced).                       |
 
 ### Alias component
 
