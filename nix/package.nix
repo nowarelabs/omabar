@@ -22,7 +22,7 @@ stdenv.mkDerivation {
 
   meta = {
     description = "A macOS status bar configured entirely via Nix";
-    homepage = "https://github.com/anomalyco/omabar";
+    homepage = "https://github.com/nowarelabs/omabar";
     license = lib.licenses.mit;
     platforms = lib.platforms.darwin;
     maintainers = [ ];

@@ -56,7 +56,7 @@ stdenv.mkDerivation {
 
   meta = {
     description = "Swift plugin SDK (protocol + IPC client) for omabar";
-    homepage = "https://github.com/anomalyco/omabar";
+    homepage = "https://github.com/nowarelabs/omabar";
     license = lib.licenses.mit;
     platforms = lib.platforms.darwin;
     maintainers = [ ];
