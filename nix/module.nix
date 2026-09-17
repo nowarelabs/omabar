@@ -815,7 +815,7 @@ in
       serviceConfig = {
         RunAtLoad = true;
         KeepAlive = false;
-        ProcessType = "UserInteractive";
+        ProcessType = "Interactive";
         ThrottleInterval = 1;
       } // (lib.optionalAttrs cfg.daemon.hotload {
         WatchPaths = [ "/etc/omabar_config" ];
