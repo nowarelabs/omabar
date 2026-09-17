@@ -31,6 +31,8 @@ void bar_item_init(struct bar_item *item) {
     text_init(&item->icon);
     text_init(&item->label);
     background_init(&item->background);
+    item->popup = calloc(1, sizeof(*item->popup));
+    if (item->popup) popup_init(item->popup, item);
 }
 
 void bar_item_destroy(struct bar_item *item) {
@@ -42,7 +44,11 @@ void bar_item_destroy(struct bar_item *item) {
     if (item->graph) graph_destroy(item->graph);
     if (item->alias) alias_destroy(item->alias);
     if (item->slider) slider_destroy(item->slider);
-    if (item->popup) popup_destroy(item->popup);
+    if (item->popup) {
+        popup_destroy(item->popup);
+        free(item->popup);
+        item->popup = NULL;
+    }
     free(item->script);
     free(item->click_script);
     free(item->scroll_values);
@@ -109,10 +115,27 @@ struct bar_item *bar_item_clone(const struct bar_item *src) {
         dst->graph = graph_create(src->graph->width, src->graph->height);
         dst->graph->fill_color = src->graph->fill_color;
         dst->graph->line_color = src->graph->line_color;
+        dst->graph->max_points = src->graph->max_points;
         dst->graph->count = src->graph->count;
         if (dst->graph->data && src->graph->data) {
             memcpy(dst->graph->data, src->graph->data,
                    (size_t)dst->graph->count * sizeof(float));
+        }
+    }
+
+    if (src->alias) {
+        dst->alias = alias_create();
+        if (dst->alias) {
+            dst->alias->width = src->alias->width;
+            dst->alias->height = src->alias->height;
+            dst->alias->corner_radius = src->alias->corner_radius;
+            dst->alias->disable_shadows = src->alias->disable_shadows;
+            dst->alias->update_frequency = src->alias->update_frequency;
+            dst->alias->inverse = src->alias->inverse;
+            dst->alias->background_color = src->alias->background_color;
+            alias_set_target(dst->alias, src->alias->owner, src->alias->name);
+            alias_set_bundle_id(dst->alias, src->alias->bundle_id);
+            alias_set_target_pid(dst->alias, src->alias->target_pid);
         }
     }
 
@@ -157,6 +180,22 @@ struct bar_item *bar_item_clone(const struct bar_item *src) {
     dst->icon_x_offset = src->icon_x_offset;
     dst->update_interval = src->update_interval;
     dst->index = src->index;
+
+    if (src->popup) {
+        dst->popup = calloc(1, sizeof(*dst->popup));
+        if (dst->popup) {
+            popup_init(dst->popup, dst);
+            dst->popup->cell_size = src->popup->cell_size;
+            dst->popup->y_offset = src->popup->y_offset;
+            dst->popup->background = src->popup->background;
+            dst->popup->item_background = src->popup->item_background;
+            /* deep-copy the popup item list */
+            for (int i = 0; i < src->popup->item_count; i++) {
+                struct bar_item *child = bar_item_clone(src->popup->items[i]);
+                if (child) popup_add_item(dst->popup, child);
+            }
+        }
+    }
 
     return dst;
 }
@@ -301,6 +340,21 @@ void bar_item_update(struct bar_item *item, const char *sender, const char *info
         env_vars_destroy(&env);
     }
 
+    /* component refreshes: aliases capture on app switches / routine ticks,
+       graphs advance their live data stream on the animation tick. */
+    if (item->alias) {
+        if (!item->alias->permission)
+            alias_request_permission(item->alias);
+        bool forced = sender
+            && (strstr(sender, "front_app") || strstr(sender, "forced"));
+        if (alias_update(item->alias, forced))
+            bar_item_refresh(item);
+    }
+    else if (item->graph && item->graph->data_source
+             && item->graph->data_source(item)) {
+        bar_item_refresh(item);
+    }
+
     bar_item_calculate_bounds(item);
     if (item->window_count > 0)
         g_bar_manager.bar_needs_update = true;
@@ -315,12 +369,20 @@ void bar_item_on_click(struct bar_item *item, uint32_t button,
         return;
     }
 
+    /* a host item with a popup toggles it on click */
+    if (item->popup && popup_has_items(item->popup)
+        && item->popup->drawing && button == 1) {
+        popup_toggle(item->popup);
+        bar_item_refresh(item);
+    }
+
     if (item->slider) {
-        CGRect frame = CGRectMake(0, 0, item->slider->width, item->slider->height);
+        CGRect frame = bar_item_slider_frame(item);
         if (slider_hit_test(frame, point)) {
-            slider_handle_drag(item->slider, point, frame);
-            if (item->slider->is_dragged)
+            if (slider_handle_drag(item->slider, point, frame)) {
                 bar_item_refresh(item);
+            }
+            slider_cancel_drag(item->slider);
         }
     }
 
@@ -338,9 +400,97 @@ void bar_item_on_click(struct bar_item *item, uint32_t button,
     env_vars_destroy(&env);
 }
 
+void bar_item_on_drag(struct bar_item *item, CGPoint point) {
+    if (!item || !item->slider) return;
+    if (!item->slider->is_dragged) return;
+
+    CGRect frame = bar_item_slider_frame(item);
+    if (slider_handle_drag(item->slider, point, frame)) {
+        char percentage[16];
+        snprintf(percentage, sizeof(percentage), "%d",
+                 (int)lround(((item->slider->value - item->slider->min)
+                              / (item->slider->max - item->slider->min)) * 100.0));
+        struct env_vars env = bar_item_make_env(item, "mouse.dragged",
+                                                percentage, "none", "none", NULL);
+        if (item->script && (item->update_mask & UPDATE_MOUSE_DRAGGED))
+            bar_item_run_script(item, &env);
+        env_vars_destroy(&env);
+
+        bar_item_refresh(item);
+    }
+}
+
+void bar_item_cancel_drag(struct bar_item *item) {
+    if (!item || !item->slider) return;
+
+    char percentage[16];
+    if (item->slider->max > item->slider->min) {
+        snprintf(percentage, sizeof(percentage), "%d",
+                 (int)lround(((item->slider->value - item->slider->min)
+                              / (item->slider->max - item->slider->min)) * 100.0));
+    } else {
+        snprintf(percentage, sizeof(percentage), "%d", 0);
+    }
+
+    struct env_vars env = bar_item_make_env(item, "mouse.clicked",
+                                            percentage, "none", "none", NULL);
+    if (item->click_script) {
+        fork_exec(item->click_script, &env);
+    }
+    if (item->script && (item->update_mask & UPDATE_MOUSE_CLICKED)) {
+        bar_item_run_script(item, &env);
+    }
+    env_vars_destroy(&env);
+
+    slider_cancel_drag(item->slider);
+    bar_item_refresh(item);
+}
+
 void bar_item_on_scroll(struct bar_item *item, int scroll_delta,
                         uint32_t modifier) {
     if (!item) return;
+    (void)modifier;
+
+    if (item->scroll_enabled && item->scroll_sensitivity > 0.0f) {
+        float target_value;
+
+        /* advance through the scroll_values list (wrap-around); the bump
+           glides to the newly selected list value */
+        if (item->scroll_values && item->scroll_value_count > 0) {
+            item->scroll_index =
+                (item->scroll_index + scroll_delta) % item->scroll_value_count;
+            if (item->scroll_index < 0)
+                item->scroll_index += item->scroll_value_count;
+            target_value = item->scroll_values[item->scroll_index];
+        } else {
+            target_value = (float)scroll_delta * item->scroll_sensitivity;
+        }
+
+        /* smooth scrub: bump scroll_offset out, then ease it back to zero */
+        struct animation *out = calloc(1, sizeof(struct animation));
+        struct animation *in  = calloc(1, sizeof(struct animation));
+        if (out && in) {
+            out->target = &item->scroll_offset;
+            out->type = ANIMATION_FLOAT;
+            out->function = ANIMATION_EASE_OUT;
+            out->initial = item->scroll_offset;
+            out->final = target_value;
+            out->duration = 0.18;
+
+            in->target = &item->scroll_offset;
+            in->type = ANIMATION_FLOAT;
+            in->function = ANIMATION_EASE_OUT;
+            in->initial = target_value; /* overwritten when chained */
+            in->final = 0.0f;
+            in->duration = 0.25;
+
+            out->next = in;
+            animation_run(&g_bar_manager.animator, out);
+        } else {
+            free(out);
+            free(in);
+        }
+    }
 
     if (item->update_mask & UPDATE_MOUSE_SCROLLED) {
         char delta[16];
@@ -364,6 +514,36 @@ void bar_item_mouse_exited(struct bar_item *item) {
     item->mouse_over = false;
     if (item->update_mask & UPDATE_MOUSE_EXITED)
         bar_item_update(item, "mouse.exited", NULL);
+}
+
+CGRect bar_item_slider_frame(struct bar_item *item) {
+    if (!item || !item->slider) return CGRectZero;
+    /* slider is drawn after the icon run: padding + icon_x_offset + icon width */
+    float x = (float)item->padding_left + (float)item->icon_x_offset
+              + item->icon.line.width;
+    return CGRectMake(x, (float)item->y_offset,
+                      (float)item->slider->width,
+                      (float)item->slider->height);
+}
+
+bool bar_item_has_slider(struct bar_item *item) {
+    return item && item->slider;
+}
+
+void bar_item_set_slider(struct bar_item *item, double min, double max,
+                         double value) {
+    if (!item) return;
+    if (!item->slider) item->slider = slider_create();
+    if (!item->slider) return;
+    slider_set_range(item->slider, value, min, max);
+    bar_item_calculate_bounds(item);
+    if (item->window_count > 0)
+        g_bar_manager.bar_needs_update = true;
+}
+
+double bar_item_slider_value(struct bar_item *item) {
+    if (!item || !item->slider) return 0.0;
+    return item->slider->value;
 }
 
 CGRect bar_item_calculate_bounds(struct bar_item *item) {
@@ -643,11 +823,102 @@ void bar_item_set_scroll_enabled(struct bar_item *item, int enabled) {
     item->scroll_enabled = enabled;
 }
 
+void bar_item_set_scroll_sensitivity(struct bar_item *item, float sensitivity) {
+    if (!item) return;
+    if (item->scroll_sensitivity == sensitivity) return;
+    item->scroll_sensitivity = sensitivity;
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_set_scroll_values(struct bar_item *item, float *values, int count) {
+    if (!item) return;
+    free(item->scroll_values);
+    item->scroll_values = NULL;
+    item->scroll_value_count = 0;
+    item->scroll_index = 0;
+    if (values && count > 0) {
+        item->scroll_values = malloc(sizeof(float) * (size_t)count);
+        if (item->scroll_values) {
+            memcpy(item->scroll_values, values, sizeof(float) * (size_t)count);
+            item->scroll_value_count = count;
+        }
+    }
+    bar_item_needs_refresh(item, true);
+}
+
 void bar_item_set_y_offset(struct bar_item *item, int offset) {
     if (!item) return;
     if (item->y_offset == offset) return;
     item->y_offset = offset;
     bar_item_needs_refresh(item, true);
+}
+
+/* Keep alias items live: re-capture when the front app changes and on the
+   routine scroll tick so menu bar changes (battery %, clocks…) are seen. */
+static void bar_item_alias_enable_live_updates(struct bar_item *item) {
+    if (!item || !item->alias) return;
+    if (!item->alias->permission)
+        alias_request_permission(item->alias);
+    bar_item_event_subscribe(item, "front_app_switched");
+    bar_item_event_subscribe(item, "scroll.tick");
+}
+
+void bar_item_set_alias_target(struct bar_item *item, const char *owner,
+                               const char *name) {
+    if (!item) return;
+    if (!item->alias) item->alias = alias_create();
+    if (!item->alias) return;
+    alias_set_target(item->alias, owner, name);
+    bar_item_alias_enable_live_updates(item);
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_set_alias_bundle_id(struct bar_item *item, const char *bundle_id) {
+    if (!item) return;
+    if (!item->alias) item->alias = alias_create();
+    if (!item->alias) return;
+    alias_set_bundle_id(item->alias, bundle_id);
+    bar_item_alias_enable_live_updates(item);
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_set_alias_size(struct bar_item *item, int width, int height) {
+    if (!item) return;
+    if (!item->alias) item->alias = alias_create();
+    if (!item->alias) return;
+    alias_set_size(item->alias, width, height);
+    bar_item_alias_enable_live_updates(item);
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_set_graph(struct bar_item *item, float width, float height) {
+    if (!item) return;
+    if (!item->graph) item->graph = graph_create(width, height);
+    if (!item->graph) return;
+    item->graph->width = width;
+    item->graph->height = height;
+    /* CVDisplayLink-driven redraw: the animation tick re-enters this item so
+       its data source can push fresh values. */
+    bar_item_event_subscribe(item, "scroll.tick");
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_graph_push(struct bar_item *item, float value) {
+    if (!item || !item->graph) return;
+    graph_push_value(item->graph, value);
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_graph_set_range(struct bar_item *item, float min, float max) {
+    if (!item || !item->graph) return;
+    graph_set_range(item->graph, min, max);
+    bar_item_needs_refresh(item, true);
+}
+
+void bar_item_graph_set_data_source(struct bar_item *item,
+                                    graph_data_source_t source) {
+    if (!item || !item->graph) return;
+    graph_set_data_source(item->graph, source);
 }
 
 void bar_item_set_padding(struct bar_item *item, int left, int right, int top, int bottom) {

@@ -23,6 +23,7 @@ struct bar_item;
 
 bool bar_draws_item(struct bar *bar, struct bar_item *bar_item);
 void bar_sync_space_items(struct bar *bar);
+float bar_current_popup_height(struct bar *bar);
 
 struct bar *bar_create(unsigned int did);
 void bar_destroy(struct bar *bar);

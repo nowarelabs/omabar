@@ -80,6 +80,14 @@ void animation_begin(struct animator *animator) {
     animator->display_link = link;
 }
 
+static void animation_free_chain(struct animation *a) {
+    while (a) {
+        struct animation *next = a->next;
+        free(a);
+        a = next;
+    }
+}
+
 void animation_destroy(struct animator *animator) {
     if (animator->display_link) {
         #pragma clang diagnostic push
@@ -91,7 +99,7 @@ void animation_destroy(struct animator *animator) {
     }
     if (animator->animations) {
         for (size_t i = 0; i < buf_len(animator->animations); i++)
-            free(animator->animations[i]);
+            animation_free_chain(animator->animations[i]);
         buf_free(animator->animations);
         animator->animations = NULL;
         animator->animation_count = 0;
@@ -109,7 +117,7 @@ void animation_cancel(struct animator *animator, struct animation *animation) {
     if (!animator || !animation) return;
     for (int i = 0; i < animator->animation_count; i++) {
         if (animator->animations[i] == animation) {
-            free(animator->animations[i]);
+            animation_free_chain(animator->animations[i]);
             buf_del(animator->animations, i);
             animator->animation_count = buf_len(animator->animations);
             return;

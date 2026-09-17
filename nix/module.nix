@@ -5,6 +5,8 @@ with lib;
 let
   cfg = config.services.omabar;
 
+  theme = import ./default-theme.nix;
+
   configGenerator = import ./config-generator.nix { inherit lib pkgs; };
 
   colorType = types.str; # "0xAARRGGBB" | "#RRGGBB[AA]" | bare hex
@@ -126,88 +128,88 @@ let
       description = "Unique item name (defaults to the attr key in item lists).";
     };
     options.position = mkOption {
-      type = types.enum [ "l" "r" "c" "q" "e" ];
-      default = "l";
-      description = "Bar section: l=left, r=right, c=center, q=quarter, e=edge.";
+      type = types.nullOr (types.enum [ "l" "r" "c" "q" "e" ]);
+      default = null;
+      description = "Bar section: l=left, r=right, c=center, q=quarter, e=edge; null inherits the theme.";
     };
     options.icon = mkOption {
-      type = fontType;
-      default = { };
+      type = types.nullOr fontType;
+      default = null;
       description = "Item icon (defaults or overrides per item).";
     };
     options.label = mkOption {
-      type = textType;
-      default = { };
+      type = types.nullOr textType;
+      default = null;
       description = "Item label (defaults or overrides per item).";
     };
     options.background = mkOption {
-      type = backgroundType;
-      default = { };
+      type = types.nullOr backgroundType;
+      default = null;
       description = "Item background (defaults or overrides per item).";
     };
     options.update_interval = mkOption {
-      type = types.int;
-      default = 0;
-      description = "Re-run the script every N scroll ticks; 0 = on event only.";
+      type = types.nullOr types.int;
+      default = null;
+      description = "Re-run the script every N scroll ticks; 0 = on event only; null inherits the theme.";
     };
     options.update_mask = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-      description = "Event names that trigger this item's script.";
+      type = types.nullOr (types.listOf types.str);
+      default = null;
+      description = "Event names that trigger this item's script; null inherits the theme.";
     };
     options.associated_space = mkOption {
-      type = types.int;
-      default = -1;
-      description = "Only show on this Space (-1 = all).";
+      type = types.nullOr types.int;
+      default = null;
+      description = "Only show on this Space (-1 = all; null inherits the theme).";
     };
     options.associated_display = mkOption {
-      type = types.int;
-      default = -1;
-      description = "Only show on this display (-1 = all).";
+      type = types.nullOr types.int;
+      default = null;
+      description = "Only show on this display (-1 = all; null inherits the theme).";
     };
     options.script = mkOption {
-      type = types.str;
-      default = "";
+      type = types.nullOr types.str;
+      default = null;
       description = "ScriptPath or shell command to produce the item content.";
     };
     options.click_script = mkOption {
-      type = types.str;
-      default = "";
+      type = types.nullOr types.str;
+      default = null;
       description = "Script command run on click.";
     };
     options.y_offset = mkOption {
-      type = types.int;
-      default = 0;
+      type = types.nullOr types.int;
+      default = null;
       description = "Vertical offset of the item in points.";
     };
     options.padding_left = mkOption {
-      type = types.int;
-      default = 2;
+      type = types.nullOr types.int;
+      default = null;
       description = "Left padding in points.";
     };
     options.padding_right = mkOption {
-      type = types.int;
-      default = 2;
+      type = types.nullOr types.int;
+      default = null;
       description = "Right padding in points.";
     };
     options.label_x_offset = mkOption {
-      type = types.int;
-      default = 0;
+      type = types.nullOr types.int;
+      default = null;
       description = "Horizontal offset of the label in points.";
     };
     options.icon_x_offset = mkOption {
-      type = types.int;
-      default = 0;
+      type = types.nullOr types.int;
+      default = null;
       description = "Horizontal offset of the icon in points.";
     };
     options.scroll_enabled = mkOption {
-      type = types.bool;
-      default = false;
+      type = types.nullOr types.bool;
+      default = null;
       description = "Whether the item reacts to scroll events.";
     };
     options.click_enabled = mkOption {
-      type = types.bool;
-      default = true;
+      type = types.nullOr types.bool;
+      default = null;
       description = "Whether the item reacts to click events.";
     };
     options.mach_helper = mkOption {
@@ -216,22 +218,22 @@ let
       description = "Mach helper (background light) to install.";
     };
     options.type = mkOption {
-      type = types.str;
-      default = "";
-      description = "Component type; empty = plain script item, space = space component.";
+      type = types.nullOr types.str;
+      default = null;
+      description = "Component type; empty = plain script item, space = space component; null inherits the theme.";
     };
     options.icon_strip = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
+      type = types.nullOr (types.listOf types.str);
+      default = null;
       description = "Icon strip for the space component (per-space icons).";
     };
     options.icon_highlight_color = mkOption {
-      type = colorType;
-      default = "";
+      type = types.nullOr colorType;
+      default = null;
       description = "Highlighted icon color used for selected spaces.";
     };
     options.selected_background = mkOption {
-      type = types.submodule {
+      type = types.nullOr (types.submodule {
         options.color = mkOption {
           type = colorType;
           default = "0x00000000";
@@ -252,9 +254,106 @@ let
           default = 0;
           description = "Selected space border width in points.";
         };
-      };
-      default = { };
+      });
+      default = null;
       description = "Background used for the selected space.";
+    };
+    options.alias = mkOption {
+      type = types.nullOr (types.submodule {
+        options.target_pid = mkOption {
+          type = types.str;
+          default = "";
+          description = "Capture the menu bar of this PID's app.";
+        };
+        options.bundle_id = mkOption {
+          type = types.str;
+          default = "";
+          description = "Capture the menu bar of the app with this bundle id.";
+        };
+        options.owner = mkOption {
+          type = types.str;
+          default = "";
+          description = "Capture the menu bar of the app with this process name.";
+        };
+        options.name = mkOption {
+          type = types.str;
+          default = "";
+          description = "Capture only the named menu bar window (optional).";
+        };
+        options.width = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Rendered width in points (0 = use captured size).";
+        };
+        options.height = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Rendered height in points (0 = use captured size).";
+        };
+        options.corner_radius = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Corner radius applied to the captured image.";
+        };
+        options.update_freq = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Re-capture every N updates; 0 = on event/front-app switch only.";
+        };
+        options.inverse = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Invert the captured pixels (Difference blend).";
+        };
+      });
+      default = null;
+      description = "Alias component (captures another app's menu bar item).";
+    };
+    options.graph = mkOption {
+      type = types.nullOr (types.submodule {
+        options.width = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Graph width in points.";
+        };
+        options.height = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Graph height in points.";
+        };
+        options.line_width = mkOption {
+          type = types.float;
+          default = 0.0;
+          description = "Graph line stroke width in points (0 = default 1.0).";
+        };
+        options.fill_color = mkOption {
+          type = colorType;
+          default = "";
+          description = "Area fill color below the line.";
+        };
+        options.line_color = mkOption {
+          type = colorType;
+          default = "";
+          description = "Line color (default white).";
+        };
+        options.max_points = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Number of buffered data points shown (0 = default).";
+        };
+        options.min = mkOption {
+          type = types.float;
+          default = 0.0;
+          description = "Minimum value for the plot range.";
+        };
+        options.max = mkOption {
+          type = types.float;
+          default = 0.0;
+          description = "Maximum value for the plot range.";
+        };
+      });
+      default = null;
+      description = "Graph component (dimensions, colors, data range).";
     };
   });
 
@@ -263,27 +362,27 @@ barItemsType = types.attrsOf barItemType;
   barItemsL = types.submodule {
     options.left = mkOption {
       type = barItemsType;
-      default = { };
+      default = theme.items.left;
       description = "Bar items shown on the left side.";
     };
     options.right = mkOption {
       type = barItemsType;
-      default = { };
+      default = theme.items.right;
       description = "Bar items shown on the right side.";
     };
     options.center = mkOption {
       type = barItemsType;
-      default = { };
+      default = theme.items.center;
       description = "Bar items shown in the center.";
     };
     options.center_left = mkOption {
       type = barItemsType;
-      default = { };
+      default = theme.items.center_left;
       description = "Bar items shown to the left of center.";
     };
     options.center_right = mkOption {
       type = barItemsType;
-      default = { };
+      default = theme.items.center_right;
       description = "Bar items shown to the right of center.";
     };
   };
@@ -301,43 +400,43 @@ in
 
       height = mkOption {
         type = types.int;
-        default = 40;
+        default = theme.bar.height;
         description = "Bar height in points.";
       };
 
       width = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.bar.width;
         description = "Bar width in points; 0 = full screen width.";
       };
 
       margin = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.bar.margin;
         description = "Bar margin from screen edges in points.";
       };
 
       blur_radius = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.bar.blur_radius;
         description = "Background blur radius in points; 0 = disabled.";
       };
 
       color = mkOption {
         type = types.str;
-        default = "";
+        default = theme.bar.color;
         description = "Bar background color (hex, e.g. 0x00000000).";
       };
 
       shadow = mkOption {
         type = types.bool;
-        default = false;
+        default = theme.bar.shadow;
         description = "Whether to draw a window shadow under the bar.";
       };
 
       shadow_color = mkOption {
         type = types.str;
-        default = "";
+        default = theme.bar.shadow_color;
         description = "Shadow color (hex, e.g. 0x00000000).";
       };
 
@@ -387,73 +486,73 @@ in
     defaults = {
       icon.font = mkOption {
         type = types.str;
-        default = "JetBrainsMono Nerd Font:style=Regular:size=13.0";
+        default = theme.defaults.icon.font;
         description = "Font string for item icons.";
       };
 
       icon.color = mkOption {
         type = types.str;
-        default = "0xffffffff";
+        default = theme.defaults.icon.color;
         description = "Icon color (hex, AARRGGBB).";
       };
 
       icon.highlight_color = mkOption {
         type = types.str;
-        default = "0xffffffff";
+        default = theme.defaults.icon.highlight_color;
         description = "Highlighted icon color (hex, AARRGGBB).";
       };
 
       label.font = mkOption {
         type = types.str;
-        default = "Hack Nerd Font:style=Medium:size=13.0";
+        default = theme.defaults.label.font;
         description = "Font string for item labels.";
       };
 
       label.color = mkOption {
         type = types.str;
-        default = "0xffffffff";
+        default = theme.defaults.label.color;
         description = "Label color (hex, AARRGGBB).";
       };
 
       label.highlight_color = mkOption {
         type = types.str;
-        default = "0xffffffff";
+        default = theme.defaults.label.highlight_color;
         description = "Highlighted label color (hex, AARRGGBB).";
       };
 
       background.color = mkOption {
         type = types.str;
-        default = "0x00000000";
+        default = theme.defaults.background.color;
         description = "Item background color (hex, AARRGGBB).";
       };
 
       background.border_color = mkOption {
         type = types.str;
-        default = "0xffffffff";
+        default = theme.defaults.background.border_color;
         description = "Item background border color (hex, AARRGGBB).";
       };
 
       background.corner_radius = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.defaults.background.corner_radius;
         description = "Item background corner radius in points.";
       };
 
       background.border_width = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.defaults.background.border_width;
         description = "Item background border width in points.";
       };
 
       padding_left = mkOption {
         type = types.int;
-        default = 2;
+        default = theme.defaults.padding_left;
         description = "Default left padding for items in points.";
       };
 
       padding_right = mkOption {
         type = types.int;
-        default = 2;
+        default = theme.defaults.padding_right;
         description = "Default right padding for items in points.";
       };
     };
@@ -605,12 +704,12 @@ in
       enable = mkEnableOption "bar item animations";
       duration = mkOption {
         type = types.float;
-        default = 0.2;
+        default = theme.animations.duration;
         description = "Animation duration in seconds.";
       };
       function = mkOption {
         type = types.enum [ "linear" "ease_in" "ease_out" "ease_in_out" "spring" ];
-        default = "ease_in_out";
+        default = theme.animations.function;
         description = "Easing function used for animation.";
       };
     };
@@ -637,12 +736,12 @@ in
     fonts = {
       packages = mkOption {
         type = types.listOf types.package;
-        default = [ ];
+        default = theme.fonts.packages;
         description = "Nix font packages installed for the bar (installed into /Library/Fonts/Nix Fonts).";
       };
       default = mkOption {
         type = types.str;
-        default = "";
+        default = theme.fonts.default;
         description = "Default font string (family:style:size) used when items omit it.";
       };
     };

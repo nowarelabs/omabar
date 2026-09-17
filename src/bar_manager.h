@@ -44,6 +44,7 @@ struct bar_manager {
 void bar_manager_init(struct bar_manager *bm);
 void bar_manager_begin(struct bar_manager *bm);
 void bar_manager_destroy(struct bar_manager *bm);
+void bar_manager_register_event_handlers(void);
 void bar_manager_refresh(struct bar_manager *bm);
 void bar_manager_set_needs_update(struct bar_manager *bm);
 void bar_manager_set_needs_resize(struct bar_manager *bm);

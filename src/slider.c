@@ -35,6 +35,19 @@ void slider_set_value(struct slider *slider, double value) {
     slider->value = value;
 }
 
+void slider_set_range(struct slider *slider, double value, double min, double max) {
+    if (!slider) return;
+    slider->min = min;
+    slider->max = max;
+    slider_set_value(slider, value);
+}
+
+void slider_cancel_drag(struct slider *slider) {
+    if (!slider) return;
+    slider->is_dragged = false;
+    slider->done = true;
+}
+
 double slider_value_for_point(struct slider *slider, CGPoint point, CGRect frame) {
     if (!slider) return slider ? slider->value : 0;
     float delta = point.x - frame.origin.x;
@@ -44,10 +57,14 @@ double slider_value_for_point(struct slider *slider, CGPoint point, CGRect frame
     return slider->min + fraction * (slider->max - slider->min);
 }
 
-void slider_handle_drag(struct slider *slider, CGPoint point, CGRect frame) {
-    if (!slider) return;
-    slider_set_value(slider, slider_value_for_point(slider, point, frame));
+bool slider_handle_drag(struct slider *slider, CGPoint point, CGRect frame) {
+    if (!slider) return false;
+    double new_value = slider_value_for_point(slider, point, frame);
+    if (fabs(new_value - slider->value) < 0.0000001 && slider->is_dragged)
+        return false;
+    slider->value = new_value;
     slider->is_dragged = true;
+    return true;
 }
 
 bool slider_hit_test(CGRect frame, CGPoint point) {

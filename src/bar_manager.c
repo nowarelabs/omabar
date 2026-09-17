@@ -7,6 +7,7 @@
 #include "dnd.h"
 #include "ipc.h"
 #include "plugin.h"
+#include "mouse.h"
 #include "misc/helpers.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <stdio.h>
@@ -20,6 +21,41 @@
 #undef EVENT_MOUSE_SCROLLED
 
 #define MAX_DISPLAYS 8
+
+/* the item currently being dragged+scribbled, if any (set on mouse down on a
+   slider, cleared on mouse up) */
+static struct bar_item *g_drag_item = NULL;
+static struct bar *g_drag_bar = NULL;
+
+/* Translate a raw Carbon mouse_event into the omabar event system. */
+static void bar_manager_handle_mouse_event(struct mouse_event *mouse_event) {
+    if (!mouse_event) return;
+    struct event e;
+    memset(&e, 0, sizeof(e));
+    e.data = &mouse_event->location;
+    e.arg2 = mouse_event->modifier;
+
+    switch (mouse_event->type) {
+        case 1: /* MOUSE_EVENT_DOWN */
+            e.type = EVENT_MOUSE_DOWN;
+            e.arg1 = mouse_event->button;
+            break;
+        case 2: /* MOUSE_EVENT_UP */
+            e.type = EVENT_MOUSE_UP;
+            e.arg1 = mouse_event->button;
+            break;
+        case 4: /* MOUSE_EVENT_DRAGGED */
+            e.type = EVENT_MOUSE_DRAGGED;
+            break;
+        case 5: /* MOUSE_EVENT_SCROLLED */
+            e.type = EVENT_MOUSE_SCROLLED;
+            e.arg1 = (uint64_t)mouse_event->scroll_delta;
+            break;
+        default:
+            return;
+    }
+    event_post(&e);
+}
 
 static void bar_manager_handle_display(const struct event *event) {
     struct bar_manager *bm = &g_bar_manager;
@@ -157,6 +193,7 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
         plugin_health_check();
     }
 
+    int item_updated = 0;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
         if (!item || item->update_interval <= 0) continue;
@@ -166,9 +203,10 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
 
         item->tick_counter = 0;
         bar_item_update(item, NULL, NULL);
+        item_updated = 1;
     }
 
-    if (bm->bar_item_count > 0)
+    if (animating || item_updated)
         bar_manager_refresh(bm);
 }
 
@@ -188,6 +226,20 @@ static struct bar_item *bar_manager_item_at(struct bar *bar, CGPoint point) {
     struct bar_manager *bm = &g_bar_manager;
     if (!bar) return NULL;
     double local_x = point.x - bar->window->origin.x;
+    double local_y = point.y - bar->window->origin.y;
+
+    /* an open popup takes priority over the main bar items */
+    for (int i = 0; i < bm->bar_item_count; i++) {
+        struct bar_item *item = bm->bar_items[i];
+        if (!item || !bar_draws_item(bar, item)) continue;
+        if (item->popup && item->popup->is_open) {
+            struct bar_item *child = NULL;
+            if (popup_item_at(item->popup, (float)local_x, (float)local_y,
+                              &child))
+                return child;
+        }
+    }
+
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
         if (!item || !bar_draws_item(bar, item)) continue;
@@ -238,8 +290,89 @@ static void bar_manager_handle_mouse_clicked(const struct event *event) {
     CGPoint *point = (CGPoint *)event->data;
     struct bar *bar = bar_manager_bar_at(bm, *point);
     struct bar_item *item = bar_manager_item_at(bar, *point);
-    if (!item) return;
+
+    if (!item) {
+        /* clicking outside any item closes all open popups */
+        for (int i = 0; i < bm->bar_item_count; i++) {
+            if (bm->bar_items[i] && bm->bar_items[i]->popup
+                && bm->bar_items[i]->popup->is_open)
+                popup_close(bm->bar_items[i]->popup);
+        }
+        bar_manager_set_needs_update(bm);
+        return;
+    }
+
     bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, *point);
+    bar_manager_set_needs_update(bm);
+}
+
+/* convert a screen-space point to item-local coordinates (item drawn at
+   item->x within the bar window, y at the bar's top) */
+static CGPoint bar_manager_local_point(struct bar *bar, struct bar_item *item,
+                                       CGPoint point) {
+    CGPoint local = point;
+    if (bar && bar->window) {
+        local.x -= bar->window->origin.x + (CGFloat)item->x;
+        local.y -= bar->window->origin.y + (CGFloat)item->y_offset;
+    }
+    return local;
+}
+
+static void bar_manager_handle_mouse_down(const struct event *event) {
+    struct bar_manager *bm = &g_bar_manager;
+    if (!event || !event->data) return;
+    CGPoint *point = (CGPoint *)event->data;
+    struct bar *bar = bar_manager_bar_at(bm, *point);
+    struct bar_item *item = bar_manager_item_at(bar, *point);
+
+    if (!item) {
+        /* clicking outside any item closes all open popups */
+        for (int i = 0; i < bm->bar_item_count; i++) {
+            if (bm->bar_items[i] && bm->bar_items[i]->popup
+                && bm->bar_items[i]->popup->is_open)
+                popup_close(bm->bar_items[i]->popup);
+        }
+        bar_manager_set_needs_update(bm);
+        return;
+    }
+
+    /* starting a drag on a slider begins the drag state */
+    if (item->slider) {
+        CGPoint local = bar_manager_local_point(bar, item, *point);
+        CGRect frame = bar_item_slider_frame(item);
+        if (slider_hit_test(frame, local)) {
+            g_drag_item = item;
+            g_drag_bar = bar;
+            slider_handle_drag(item->slider, local, frame);
+            bar_manager_set_needs_update(bm);
+            return;
+        }
+    }
+
+    bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, *point);
+    bar_manager_set_needs_update(bm);
+}
+
+static void bar_manager_handle_mouse_dragged(const struct event *event) {
+    struct bar_manager *bm = &g_bar_manager;
+    if (!event || !event->data) return;
+    if (!g_drag_item || !g_drag_item->slider) return;
+
+    CGPoint *point = (CGPoint *)event->data;
+    CGPoint local = bar_manager_local_point(g_drag_bar, g_drag_item, *point);
+    bar_item_on_drag(g_drag_item, local);
+    bar_manager_set_needs_update(bm);
+}
+
+static void bar_manager_handle_mouse_up(const struct event *event) {
+    struct bar_manager *bm = &g_bar_manager;
+    if (!event || !event->data) return;
+    if (!g_drag_item) return;
+
+    /* finish the drag: emit final value and clear drag state */
+    bar_item_cancel_drag(g_drag_item);
+    g_drag_item = NULL;
+    g_drag_bar = NULL;
     bar_manager_set_needs_update(bm);
 }
 
@@ -366,12 +499,10 @@ void bar_manager_init(struct bar_manager *bm) {
     event_init();
     custom_events_init(&bm->custom_events);
     animation_init(&bm->animator);
+    bar_manager_register_event_handlers();
 }
 
-void bar_manager_begin(struct bar_manager *bm) {
-    if (!bm) return;
-    if (bm->sleeps) return;
-
+void bar_manager_register_event_handlers(void) {
     event_handler_fn fn = bar_manager_handle_display;
     g_event_handler[EVENT_DISPLAY_ADDED] = fn;
     g_event_handler[EVENT_DISPLAY_REMOVED] = fn;
@@ -390,8 +521,19 @@ void bar_manager_begin(struct bar_manager *bm) {
     g_event_handler[EVENT_MOUSE_EXITED] = bar_manager_handle_mouse_exited;
     g_event_handler[EVENT_MOUSE_SCROLLED] = bar_manager_handle_mouse_scrolled;
     g_event_handler[EVENT_MOUSE_CLICKED] = bar_manager_handle_mouse_clicked;
-
+    g_event_handler[EVENT_MOUSE_DOWN] = bar_manager_handle_mouse_down;
+    g_event_handler[EVENT_MOUSE_UP] = bar_manager_handle_mouse_up;
+    g_event_handler[EVENT_MOUSE_DRAGGED] = bar_manager_handle_mouse_dragged;
     g_event_handler[EVENT_DAEMON_MESSAGE] = bar_manager_handle_daemon_message;
+}
+
+void bar_manager_begin(struct bar_manager *bm) {
+    if (!bm) return;
+    if (bm->sleeps) return;
+
+    bar_manager_register_event_handlers();
+
+    mouse_begin(bar_manager_handle_mouse_event);
 
     display_begin();
     workspace_event_handler_begin();

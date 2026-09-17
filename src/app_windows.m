@@ -212,3 +212,30 @@ int app_windows_is_observing(const char *pid) {
     pid_t value = (pid_t)strtol(pid, NULL, 10);
     return table_find(&g_app_registry, &value) != NULL;
 }
+
+pid_t app_windows_pid_for_bundle_id(const char *bundle_id) {
+    if (!bundle_id || !*bundle_id) return 0;
+
+    NSString *identifier =
+        [NSString stringWithUTF8String:bundle_id];
+    NSArray<NSRunningApplication *> *apps =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:identifier];
+    for (NSRunningApplication *app in apps) {
+        if (app.activationPolicy == NSApplicationActivationPolicyRegular)
+            return (pid_t)app.processIdentifier;
+    }
+    return apps.count > 0 ? (pid_t)apps.firstObject.processIdentifier : 0;
+}
+
+const char *app_windows_name_for_pid(pid_t pid, char *buf, size_t len) {
+    if (!buf || len == 0) return NULL;
+    buf[0] = '\0';
+
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    NSString *name = app ? app.localizedName : nil;
+    if (!name) return NULL;
+
+    const char *utf8 = name.UTF8String;
+    snprintf(buf, len, "%s", utf8 ? utf8 : "");
+    return buf;
+}

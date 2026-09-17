@@ -17,9 +17,26 @@
 { lib, pkgs }:
 
 let
-  inherit (builtins) toJSON attrNames map listToAttrs length;
+  inherit (builtins) toJSON attrNames map listToAttrs length isAttrs isList mapAttrs hasAttr;
 
-  inherit (lib) filterAttrs mapAttrsToList groupBy concatLists concatMap filter;
+  inherit (lib) filterAttrs mapAttrsToList groupBy concatLists concatMap filter unique recursiveUpdate;
+
+  theme = import ./default-theme.nix;
+
+  /* Recursively strip null leaves. barItemType options default to null for
+     "unset" so that a user override does not clobber the theme's per-item
+     defaults with empty typed values. */
+  dropNulls = v:
+    if isList v then map dropNulls v
+    else if isAttrs v then filterAttrs (_: vv: vv != null) (mapAttrs (_: dropNulls) v)
+    else v;
+
+  /* Merge order (later wins): theme per-item template <- defaultItem <- user.
+     Only the fields the user actually set (non-null) override the theme. */
+  mergedItem = cfg: section: name: it:
+    recursiveUpdate
+      (recursiveUpdate (theme.items.${section}.${name} or { }) (dropNulls (cfg.defaultItem or { })))
+      (dropNulls it);
 
   /* Per-component defaults for the convenience shortcuts (task 65). */
   componentSide = {
@@ -55,12 +72,27 @@ let
     filterAttrs (n: v: v != "" && v != 0 && v != null)
       { color = b.color or ""; border_color = b.border_color or ""; corner_radius = b.corner_radius or 0; border_width = b.border_width or 0; };
 
-  itemToJSON = name: it:
+  cleanAlias = a:
+    filterAttrs (n: v: v != "" && v != 0 && v != null && v != false)
+      { target_pid = a.target_pid or ""; bundle_id = a.bundle_id or ""; owner = a.owner or ""; name = a.name or "";
+        width = a.width or 0; height = a.height or 0; corner_radius = a.corner_radius or 0;
+        update_freq = a.update_freq or 0; inverse = a.inverse or false; };
+
+  cleanGraph = g:
+    filterAttrs (n: v: v != "" && v != 0 && v != null && v != false)
+      { width = g.width or 0; height = g.height or 0; line_width = g.line_width or 0.0;
+        fill_color = g.fill_color or ""; line_color = g.line_color or "";
+        max_points = g.max_points or 0; min = g.min or 0.0; max = g.max or 0.0; };
+
+  itemToJSON = cfg: section: name: raw:
     let
+      it = mergedItem cfg section name raw;
       icon = cleanIcon (it.icon or { });
       label = cleanLabel (it.label or { });
       background = cleanBackground (it.background or { });
       selected = cleanBackground (it.selected_background or { });
+      alias = cleanAlias (it.alias or { });
+      graph = cleanGraph (it.graph or { });
       opts = it.options or it;
     in
     filterAttrs (n: v: v != "" && v != null && v != { } && v != [ ] && v != false)
@@ -74,6 +106,8 @@ let
         label = if label == { } then null else label;
         background = if background == { } then null else background;
         selected_background = if selected == { } then null else selected;
+        alias = if alias == { } then null else alias;
+        graph = if graph == { } then null else graph;
         update_interval = opts.update_interval or 0;
         update_mask = opts.update_mask or [ ];
         associated_space = opts.associated_space or (-1);
@@ -121,7 +155,7 @@ let
         map (name: {
           section = key;
           inherit name;
-          config = (cfg.items.${key} or { }).${name} or {};
+          config = mergedItem cfg key name ((cfg.items.${key} or { }).${name} or { });
         })
             (attrNames (cfg.items.${key} or { }))
       ) [ "left" "right" "center" "center_left" "center_right" ]);
@@ -134,10 +168,11 @@ let
         let t = it.config.type or "";
         in  map (e: { item = it.name; event = e; })
               ((componentEvents.${t} or [ ]) ++ (it.config.update_mask or [ ]));
+      all = concatMap evFor explicit;
     in
     {
       components = compItems;
-      items = concatMap evFor explicit;
+      items = unique all;
     };
 
   render = cfg:
@@ -169,13 +204,13 @@ let
       };
       items = {
         left = sectionFromComponents "left" cfg.components
-               ++ itemsSection "left" cfg.items.left;
+               ++ itemsSectionWithTheme cfg "left" cfg.items.left;
         right = sectionFromComponents "right" cfg.components
-                ++ itemsSection "right" cfg.items.right;
+                ++ itemsSectionWithTheme cfg "right" cfg.items.right;
         center = sectionFromComponents "center" cfg.components
-                 ++ itemsSection "center" cfg.items.center;
-        center_left = itemsSection "center_left" cfg.items.center_left;
-        center_right = itemsSection "center_right" cfg.items.center_right;
+                 ++ itemsSectionWithTheme cfg "center" cfg.items.center;
+        center_left = itemsSectionWithTheme cfg "center_left" cfg.items.center_left;
+        center_right = itemsSectionWithTheme cfg "center_right" cfg.items.center_right;
       };
       animations = {
         enable = cfg.animations.enable or false;
@@ -198,8 +233,15 @@ let
         (filterAttrs (_: p: p.enable or false) cfg.plugins);
     };
 
-  itemsSection = key: namedItems:
-    map (name: itemToJSON name namedItems.${name}) (attrNames namedItems);
+  itemsSection = cfg: key: namedItems:
+    map (name: itemToJSON cfg key name namedItems.${name}) (attrNames namedItems);
+
+  /* A section = user items + theme items not overridden by the user, so the
+     theme keeps working as the baseline while users add/tune freely. */
+  itemsSectionWithTheme = cfg: key: namedItems:
+    itemsSection cfg key namedItems
+    ++ itemsSection cfg key
+         (filterAttrs (name: _: !(hasAttr name namedItems)) (theme.items.${key} or { }));
 
   /* Encode as a derivation: binary header byte-for-byte, then JSON payload.
      The payload may reference plugin store paths, so it is passed through

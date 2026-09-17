@@ -230,6 +230,23 @@ void bar_calculate_bounds(struct bar *bar) {
     bar->x_offset = bar->window->origin.x;
 }
 
+/* Height of the tallest open popup on this bar (0 if none open). Used to
+   extend the bar window so popup content is visible below the bar. */
+float bar_current_popup_height(struct bar *bar) {
+    if (!bar) return 0.0f;
+    struct bar_manager *bm = &g_bar_manager;
+    float max_h = 0.0f;
+    for (int i = 0; i < bm->bar_item_count; i++) {
+        struct bar_item *item = bm->bar_items[i];
+        if (!item || !bar_draws_item(bar, item)) continue;
+        if (item->popup && item->popup->is_open) {
+            float h = popup_get_height(item->popup);
+            if (h > max_h) max_h = h;
+        }
+    }
+    return max_h;
+}
+
 void bar_draw(struct bar *bar) {
     if (!bar || !bar->window || !bar->window->context) return;
     if (bar->adid < 1 || bar->hidden) return;
@@ -255,14 +272,36 @@ void bar_draw(struct bar *bar) {
         struct bar_item *item = bm->bar_items[i];
         if (!item || !bar_draws_item(bar, item)) continue;
 
-        /* save, translate to item's slot, draw, restore */
+        /* save, translate to item's slot plus scroll displacement, draw, restore */
         CGContextSaveGState(ctx);
-        CGContextTranslateCTM(ctx, item->x, 0);
+        CGContextTranslateCTM(ctx, item->x + item->scroll_offset, 0);
         bar_item_draw(item, bar, ctx);
         CGContextRestoreGState(ctx);
+    }
 
-        if (item->popup && item->popup->is_open)
-            popup_draw(item->popup, ctx);
+    /* draw open popups (anchored below their host items) */
+    for (int i = 0; i < bm->bar_item_count; i++) {
+        struct bar_item *item = bm->bar_items[i];
+        if (!item || !bar_draws_item(bar, item)) continue;
+        if (!item->popup || !item->popup->is_open) continue;
+
+        item->popup->anchor_x = item->x;
+        item->popup->anchor_y = (float)frame.size.height;
+        popup_calculate_bounds(item->popup, item->x, (float)frame.size.height);
+        popup_draw(item->popup, bar, ctx);
+    }
+
+    /* extend the window height to cover open popups so they are visible;
+       restore to the base bar height once all popups close */
+    float base_h = (float)g_bar_manager.height;
+    float popup_h = bar_current_popup_height(bar);
+    int target_h = (int)(popup_h > 0 ? base_h + popup_h : base_h);
+    if (target_h != (int)frame.size.height) {
+        window_set_frame(bar->window,
+                         (int)bar->window->origin.x,
+                         (int)bar->window->origin.y,
+                         (int)frame.size.width,
+                         target_h);
     }
 
     CGContextFlush(ctx);

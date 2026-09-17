@@ -19,6 +19,7 @@ struct window;
 #define UPDATE_MOUSE_EXITED     (1ULL << 3)
 #define UPDATE_MOUSE_SCROLLED   (1ULL << 4)
 #define UPDATE_MOUSE_CLICKED    (1ULL << 5)
+#define UPDATE_MOUSE_DRAGGED    (1ULL << 21)
 #define UPDATE_VOLUME_CHANGED   (1ULL << 6)
 #define UPDATE_POWER_CHANGED    (1ULL << 7)
 #define UPDATE_WIFI_CHANGED     (1ULL << 8)
@@ -118,9 +119,15 @@ void bar_item_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx);
 CGRect bar_item_calculate_bounds(struct bar_item *item);
 void bar_item_update(struct bar_item *item, const char *sender, const char *info);
 void bar_item_on_click(struct bar_item *item, uint32_t button, uint32_t modifier, CGPoint point);
+void bar_item_on_drag(struct bar_item *item, CGPoint point);
+void bar_item_cancel_drag(struct bar_item *item);
 void bar_item_on_scroll(struct bar_item *item, int scroll_delta, uint32_t modifier);
 void bar_item_mouse_entered(struct bar_item *item);
 void bar_item_mouse_exited(struct bar_item *item);
+CGRect bar_item_slider_frame(struct bar_item *item);
+bool bar_item_has_slider(struct bar_item *item);
+void bar_item_set_slider(struct bar_item *item, double min, double max, double value);
+double bar_item_slider_value(struct bar_item *item);
 
 /* property setters (each marks the item for refresh) */
 void bar_item_set_name(struct bar_item *item, const char *name);
@@ -143,7 +150,18 @@ void bar_item_set_click_script(struct bar_item *item, const char *script);
 void bar_item_set_hidden(struct bar_item *item, int hidden);
 void bar_item_set_click_enabled(struct bar_item *item, int enabled);
 void bar_item_set_scroll_enabled(struct bar_item *item, int enabled);
+void bar_item_set_scroll_sensitivity(struct bar_item *item, float sensitivity);
+void bar_item_set_scroll_values(struct bar_item *item, float *values, int count);
 void bar_item_set_y_offset(struct bar_item *item, int offset);
+
+/* component helpers */
+void bar_item_set_alias_target(struct bar_item *item, const char *owner, const char *name);
+void bar_item_set_alias_bundle_id(struct bar_item *item, const char *bundle_id);
+void bar_item_set_alias_size(struct bar_item *item, int width, int height);
+void bar_item_set_graph(struct bar_item *item, float width, float height);
+void bar_item_graph_push(struct bar_item *item, float value);
+void bar_item_graph_set_range(struct bar_item *item, float min, float max);
+void bar_item_graph_set_data_source(struct bar_item *item, graph_data_source_t source);
 void bar_item_set_padding(struct bar_item *item, int left, int right, int top, int bottom);
 void bar_item_set_label_x_offset(struct bar_item *item, int offset);
 void bar_item_set_icon_x_offset(struct bar_item *item, int offset);

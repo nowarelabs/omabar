@@ -53,10 +53,10 @@ SANITIZE :=
 $(ODIR)/omabar: $(patsubst %.o, $(ODIR)/%.o, $(_OBJ))
 	$(CC) $(CFLAGS) $(SANITIZE) $^ -o $@ $(LIBS)
 
-$(ODIR)/%.o: $(SRC)/%.c | $(ODIR)
+$(ODIR)/%.o: $(SRC)/%.c $(wildcard $(SRC)/*.h $(SRC)/misc/*.h) | $(ODIR)
 	$(CC) $(CFLAGS) $(SANITIZE) -I$(SRC) -c $< -o $@
 
-$(ODIR)/%.o: $(SRC)/%.m | $(ODIR)
+$(ODIR)/%.o: $(SRC)/%.m $(wildcard $(SRC)/*.h $(SRC)/misc/*.h) | $(ODIR)
 	$(CC) $(OBJCFLAGS) $(CFLAGS) $(SANITIZE) -I$(SRC) -c $< -o $@
 
 $(ODIR):

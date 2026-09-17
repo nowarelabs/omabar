@@ -14,6 +14,7 @@ struct alias {
     int corner_radius;
     int disable_shadows;
     char *target_pid;
+    char *bundle_id;
     char *owner;
     char *name;
     struct color background_color;
@@ -29,6 +30,9 @@ struct alias {
 struct alias *alias_create(void);
 void alias_destroy(struct alias *alias);
 void alias_set_target(struct alias *alias, const char *owner, const char *name);
+void alias_set_bundle_id(struct alias *alias, const char *bundle_id);
+void alias_set_target_pid(struct alias *alias, const char *target_pid);
+void alias_set_size(struct alias *alias, int width, int height);
 bool alias_request_permission(struct alias *alias);
 bool alias_update(struct alias *alias, bool forced);
 bool alias_update_image(struct alias *alias, bool forced);

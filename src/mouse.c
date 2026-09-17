@@ -2,6 +2,15 @@
 #include "misc/helpers.h"
 #include <Carbon/Carbon.h>
 
+/* types reported to the handler (kept as small ints to stay self-contained) */
+enum {
+    MOUSE_EVENT_DOWN = 1,
+    MOUSE_EVENT_UP = 2,
+    MOUSE_EVENT_MOVED = 3,
+    MOUSE_EVENT_DRAGGED = 4,
+    MOUSE_EVENT_SCROLLED = 5
+};
+
 static mouse_handler_fn g_handler = NULL;
 static uint32_t g_window = 0;
 static EventHandlerRef g_event_handler_ref = NULL;
@@ -17,36 +26,41 @@ static OSStatus mouse_callback(EventHandlerCallRef call_ref, EventRef event, voi
     struct mouse_event me;
     memset(&me, 0, sizeof(me));
 
-    GetEventParameter(event, kEventParamMouseLocation, typeQDPoint,
-                      NULL, sizeof(Point), NULL, NULL);
+    CGEventRef cg_event = CopyEventCGEvent(event);
+    if (cg_event) {
+        me.location = CGEventGetLocation(cg_event);
+        me.modifier = (uint32_t)CGEventGetFlags(cg_event);
+        me.button = (uint32_t)CGEventGetIntegerValueField(cg_event,
+                                                          kCGMouseEventButtonNumber);
+        CFRelease(cg_event);
+    } else {
+        Point qd = { 0, 0 };
+        if (GetEventParameter(event, kEventParamMouseLocation, typeQDPoint,
+                              NULL, sizeof(Point), NULL, &qd) == noErr) {
+            me.location = CGPointMake(qd.h, qd.v);
+        }
+    }
 
     switch (event_kind) {
         case kEventMouseDown:
-            me.type = 1;
-            GetEventParameter(event, kEventParamClickCount, typeSInt32,
-                              &type, sizeof(value), NULL, &value);
-            me.button = (uint32_t)value;
+            me.type = MOUSE_EVENT_DOWN;
             break;
         case kEventMouseUp:
-            me.type = 2;
-            GetEventParameter(event, kEventParamClickCount, typeSInt32,
-                              &type, sizeof(value), NULL, &value);
-            me.button = (uint32_t)value;
+            me.type = MOUSE_EVENT_UP;
             break;
         case kEventMouseMoved:
+            me.type = MOUSE_EVENT_MOVED;
+            break;
         case kEventMouseDragged:
-            me.type = 3;
+            me.type = MOUSE_EVENT_DRAGGED;
             break;
         case kEventMouseWheelMoved:
-            me.type = 5;
+            me.type = MOUSE_EVENT_SCROLLED;
             GetEventParameter(event, kEventParamMouseWheelDelta, typeSInt32,
                               &type, sizeof(value), NULL, &value);
             me.scroll_delta = (int)value;
             break;
     }
-
-    GetEventParameter(event, kEventParamKeyModifiers, typeUInt32,
-                      &type, sizeof(me.modifier), NULL, &me.modifier);
 
     g_handler(&me);
     return noErr;
