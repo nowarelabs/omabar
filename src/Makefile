@@ -23,7 +23,7 @@ LIBS := -framework Carbon \
 
 SRC := .
 
-_C_SRC := main.c event_loop.c event.c bar_manager.c bar.c bar_item.c \
+_C_SRC := main.c config.c event_loop.c event.c bar_manager.c bar.c bar_item.c \
           window.c surface.c context.c text.c font.c color.c \
           background.c shadow.c image.c graph.c alias.c slider.c \
           group.c popup.c animation.c mouse.c display.c \
@@ -31,7 +31,7 @@ _C_SRC := main.c event_loop.c event.c bar_manager.c bar.c bar_item.c \
           hotload.c private_shim.c workspace.m display_nsscreen.m \
           media.m wifi.m app_windows.m mach.c dnd.c
 
-_OBJ := main.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
+_OBJ := main.o config.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
         window.o surface.o context.o text.o font.o color.o \
         background.o shadow.o image.o graph.o alias.o slider.o \
         group.o popup.o animation.o mouse.o display.o \

@@ -1,4 +1,9 @@
 #include "main.h"
+#include "config.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct bar_manager g_bar_manager;
 struct env_vars g_env_vars;
@@ -6,6 +11,17 @@ pid_t g_pid;
 
 static int g_lock_fd = -1;
 static char g_lock_file[256];
+static char g_custom_lock_file[256];
+static char g_config_path[1024];
+static bool g_foreground = false;
+
+static void print_usage(const char *prog) {
+    fprintf(stderr, "Usage: %s [options]\n", prog);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --config, -c <path>  Path to OMABC binary configuration file\n");
+    fprintf(stderr, "  --foreground, -f     Run in foreground (do not daemonize)\n");
+    fprintf(stderr, "  --help, -h           Show this help message\n");
+}
 
 static void daemonize(void) {
     pid_t pid = fork();
@@ -38,8 +54,13 @@ static void setup_signal_handlers(void) {
 }
 
 static int acquire_lockfile(void) {
-    snprintf(g_lock_file, sizeof(g_lock_file),
-             OMABAR_LOCKFILE "%s" OMABAR_LOCKFILE_SUFFIX, getenv("USER"));
+    if (g_custom_lock_file[0] != '\0') {
+        snprintf(g_lock_file, sizeof(g_lock_file), "%s", g_custom_lock_file);
+    } else {
+        const char *user = getenv("USER");
+        snprintf(g_lock_file, sizeof(g_lock_file),
+                 OMABAR_LOCKFILE "%s" OMABAR_LOCKFILE_SUFFIX, user ? user : "user");
+    }
 
     g_lock_fd = open(g_lock_file, O_CREAT | O_RDWR, 0600);
     if (g_lock_fd < 0) return -1;
@@ -87,8 +108,27 @@ void omabar_cleanup(void) {
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv; /* Nix-only configuration: no CLI argument parsing */
+    /* CLI argument parsing */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--foreground") == 0 || strcmp(argv[i], "-f") == 0) {
+            g_foreground = true;
+        } else if (strcmp(argv[i], "--config") == 0 || strcmp(argv[i], "-c") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "omabar: option '%s' requires an argument\n", argv[i]);
+                return 1;
+            }
+            snprintf(g_config_path, sizeof(g_config_path), "%s", argv[++i]);
+        } else if (strncmp(argv[i], "--config=", 9) == 0) {
+            snprintf(g_config_path, sizeof(g_config_path), "%s", argv[i] + 9);
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        } else {
+            fprintf(stderr, "omabar: unrecognized option '%s'\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
 
     /* reject root */
     if (is_root()) {
@@ -96,18 +136,32 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* fork into the background */
-    daemonize();
+    /* bootstrap initialization */
+    omabar_init();
+
+    /* load configuration if specified */
+    if (g_config_path[0] != '\0') {
+        if (config_load(g_config_path, g_custom_lock_file, sizeof(g_custom_lock_file)) < 0) {
+            omabar_cleanup();
+            return 1;
+        }
+    }
+
+    /* fork into background unless --foreground is requested */
+    if (!g_foreground) {
+        daemonize();
+    }
 
     /* acquire lock file so only one daemon can run.
        NOTE: must happen in the daemon process — POSIX fcntl record
        locks are not inherited across fork(), so acquiring before
        daemonize() would release the lock when the parent exits. */
-    if (acquire_lockfile() < 0)
+    if (acquire_lockfile() < 0) {
+        fprintf(stderr, "omabar: failed to acquire lock file '%s' (another instance running?)\n",
+                g_lock_file[0] ? g_lock_file : "default");
+        omabar_cleanup();
         return 1;
-
-    /* bootstrap */
-    omabar_init();
+    }
 
     omabar_begin();
 
