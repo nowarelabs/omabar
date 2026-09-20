@@ -645,6 +645,18 @@ int config_load(const char *path, char *out_lock_file, size_t lock_file_size) {
         int shadow = json_get_bool(bar_obj, "shadow", false) ? 1 : 0;
         bar_manager_set_shadow(&g_bar_manager, shadow);
 
+        /* shadow_color is parsed but not yet applied — window shadow
+           color is controlled by SkyLight private APIs and not yet
+           exposed through the bar_manager setter. Documented as
+           unsupported for this loader; the bar remains visible. */
+        const char *shadow_col = json_get_str(bar_obj, "shadow_color", NULL);
+        if (shadow_col) {
+            struct color sc = color_from_hex_string(shadow_col);
+            if (color_is_valid(sc)) {
+                /* stored for future use: bg->shadow.color = sc; */
+            }
+        }
+
         int sticky = json_get_bool(bar_obj, "sticky", true) ? 1 : 0;
         bar_manager_set_sticky(&g_bar_manager, sticky);
 

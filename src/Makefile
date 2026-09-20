@@ -39,6 +39,14 @@ _OBJ := main.o config.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
         hotload.o private_shim.o app_windows.o workspace.o \
         display_nsscreen.o layer.o media.o wifi.o mach.o dnd.o
 
+_TEST_OBJ := config_test.o config.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
+        window.o surface.o context.o text.o font.o color.o \
+        background.o shadow.o image.o graph.o alias.o slider.o \
+        group.o popup.o animation.o mouse.o display.o \
+        volume.o power.o custom_events.o ipc.o ipc_client.o plugin.o \
+        hotload.o private_shim.o app_windows.o workspace.o \
+        display_nsscreen.o layer.o media.o wifi.o mach.o dnd.o
+
 ifeq ($(NDEBUG),1)
 CFLAGS += -DNDEBUG -O3
 else
@@ -49,6 +57,9 @@ endif
 # "-fsanitize=address,undefined" through it so the flags reach both
 # the compile steps and the final link.
 SANITIZE :=
+
+$(ODIR)/config_test: $(patsubst %.o, $(ODIR)/%.o, $(_TEST_OBJ))
+	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
 $(ODIR)/omabar: $(patsubst %.o, $(ODIR)/%.o, $(_OBJ))
 	$(CC) $(CFLAGS) $(SANITIZE) $^ -o $@ $(LIBS)
@@ -62,7 +73,7 @@ $(ODIR)/%.o: $(SRC)/%.m $(wildcard $(SRC)/*.h $(SRC)/misc/*.h) | $(ODIR)
 $(ODIR):
 	mkdir -p $(ODIR)
 
-all: $(ODIR)/omabar
+all: $(ODIR)/omabar $(ODIR)/config_test
 
 debug: all
 
