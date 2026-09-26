@@ -16,6 +16,7 @@ struct bar {
 
     struct background background;
     double x_offset;
+    int spaces_synced;
 };
 
 struct bar_manager;
@@ -23,6 +24,7 @@ struct bar_item;
 
 bool bar_draws_item(struct bar *bar, struct bar_item *bar_item);
 void bar_sync_space_items(struct bar *bar);
+void bar_sync_background(struct bar *bar);
 float bar_current_popup_height(struct bar *bar);
 
 struct bar *bar_create(unsigned int did);

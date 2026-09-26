@@ -100,6 +100,7 @@ let
         inherit name;
         position = opts.position or "right";
         type = opts.type or "";
+        order = opts.order or 0;
         icon = if icon == { } then null else icon;
         icon_strip = if (opts.icon_strip or [ ]) == [ ] then null else opts.icon_strip;
         icon_highlight_color = opts.icon_highlight_color or "";
@@ -121,6 +122,10 @@ let
         icon_x_offset = opts.icon_x_offset or 0;
         scroll_enabled = opts.scroll_enabled or false;
         click_enabled = opts.click_enabled or true;
+        space_gap = opts.space_gap or 4;
+        format = opts.format or "";
+        divider_width = opts.divider_width or 1;
+        divider_color = opts.divider_color or "";
         mach_helper = opts.mach_helper or null;
       };
 
@@ -194,6 +199,9 @@ let
         notch_offset = cfg.bar.notch_offset or 0;
         y_offset = cfg.bar.y_offset or 0;
         alpha = cfg.bar.alpha or 1.0;
+        corner_radius = cfg.bar.corner_radius or 0;
+        border_color = cfg.bar.border_color or "";
+        border_width = cfg.bar.border_width or 0;
       };
       defaults = {
         icon = cleanIcon cfg.defaults.icon;
@@ -233,8 +241,14 @@ let
         (filterAttrs (_: p: p.enable or false) cfg.plugins);
     };
 
+  /* Items in a section render in ascending `order` (default 0), then by
+     name. Nix attrsets are unordered, so without this a section would be
+     laid out alphabetically and ignore the order it was written in. The
+     comparator uses <= so equal orders keep their existing sequence. */
   itemsSection = cfg: key: namedItems:
-    map (name: itemToJSON cfg key name namedItems.${name}) (attrNames namedItems);
+    lib.sort (a: b: (a.order or 0) <= (b.order or 0))
+             (map (name: itemToJSON cfg key name namedItems.${name})
+                  (attrNames namedItems));
 
   /* A section = user items + theme items not overridden by the user, so the
      theme keeps working as the baseline while users add/tune freely. */

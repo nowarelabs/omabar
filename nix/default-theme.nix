@@ -1,29 +1,48 @@
 /*
  * nix/default-theme.nix — Omabar's opinionated default dark theme.
  *
- * This is the "out of the box" look: translucent dark bar with a soft blur,
- * SF Pro text, an accent blue for selections, spaces on the left, front-app on
- * the center-left, and clock / volume / battery / wifi / media on the right.
+ * The "out of the box" look: a floating rounded pill of deep violet glass
+ * hovering over the desktop, inset from the screen edges and dropped below
+ * the camera housing on notched MacBooks. Inside it, spaced like a status
+ * bar rather than a menu bar:
  *
- * The attribute set is consumed by module.nix as the *default value* for the
- * corresponding `services.omabar` options, so a user who configures nothing
- * gets this theme and can override any single field via Nix.
+ *   left   workspace pills (one per Space, the active one solid) · hairline
+ *          · now-playing note + artist/title
+ *   right  battery % · volume % · 24-hour date and time
+ *
+ * Icons are drawn as vectors by the bar itself, so this theme needs no icon
+ * font to look right. The attribute set is consumed by module.nix as the
+ * *default value* for the corresponding `services.omabar` options, so a user
+ * who configures nothing gets this theme and can override any single field.
  */
 {
   bar = {
     position = "top";
-    height = 38;
-    width = 0;
-    margin = 0;
-    blur_radius = 30;
-    color = "0x40000000";
+    height = 44;
+    width = 0;          /* 0 = span the display, minus the margins */
+    margin = 12;        /* horizontal inset from the screen edges */
+
+    /* the floating container */
+    corner_radius = 12;
+    border_width = 1;
+    border_color = "0x24ffffff";
+    blur_radius = 40;
+    color = "0x8f2b1f4a";  /* deep violet glass, ~56% opaque */
     shadow = true;
-    shadow_color = "0x40000000";
+    shadow_color = "0x73000000";
+
     topmost = true;
     sticky = true;
+
+    /* 0 lets the bar read the display's own safe-area inset, so a top bar
+       clears the notch instead of being clipped by it. Set an explicit
+       value to override. */
     notch_width = 0;
     notch_offset = 0;
-    y_offset = 0;
+    y_offset = 8;
+
+    /* window opacity, not background opacity: the glass comes from
+       bar.color's alpha, and dimming the window would fade the text too. */
     alpha = 1.0;
   };
 
@@ -31,13 +50,13 @@
     icon = {
       font = "SF Pro:Regular:13.0";
       color = "0xfff2f4f8";
-      highlight_color = "0xff40a0ff";
+      highlight_color = "0xff1b1430";
       string = "";
     };
     label = {
       font = "SF Pro:Regular:13.0";
       color = "0xfff2f4f8";
-      highlight_color = "0xff40a0ff";
+      highlight_color = "0xff1b1430";
       string = "";
     };
     background = {
@@ -52,107 +71,107 @@
 
   items = {
     left = {
+      /* One pill per Space. The active one is a solid light chip with dark
+         semibold numerals; the rest sit on a faint wash. Numbers come from
+         the chip's position, so the strip reads 1, 2, 3, 4 rather than
+         depending on an icon font. */
       spaces = {
+        order = 10;          # workspaces
         type = "space";
         position = "l";
-        icon_strip = [ "一" "二" "三" "四" "五" "六" "七" "八" "九" "十" ];
-        icon_highlight_color = "0xff40a0ff";
+        space_gap = 4;
+        icon = {
+          font = "SF Pro:Semibold:12.0";
+          color = "0xb2ffffff";
+          highlight_color = "0xff1b1430";
+        };
         background = {
-          color = "0x26ffffff";
-          corner_radius = 6;
+          color = "0x1cffffff";
+          corner_radius = 8;
           border_width = 0;
         };
         selected_background = {
-          color = "0xff40a0ff";
-          corner_radius = 6;
+          color = "0xfff4f2fb";
+          corner_radius = 8;
           border_width = 0;
         };
-        padding_left = 5;
-        padding_right = 5;
+        padding_left = 9;
+        padding_right = 9;
         update_mask = [ "space_changed" "display_changed" ];
+      };
+
+      /* separator between the workspace strip and now playing */
+      divider = {
+        order = 20;          # separator
+        type = "divider";
+        position = "l";
+        divider_width = 1;
+        divider_color = "0x2effffff";
+        padding_left = 12;
+        padding_right = 12;
+      };
+
+      media = {
+        order = 30;          # now playing
+        type = "media";
+        position = "l";
+        label = {
+          font = "SF Pro:Medium:12.0";
+          color = "0xdcece4f7";
+        };
+        padding_left = 2;
+        padding_right = 4;
+        update_interval = 60;
+        update_mask = [ "media_changed" "front_app_switched" "scroll.tick" ];
       };
     };
 
     center = { };
 
-    center_left = {
-      front_app = {
-        type = "front_app";
-        position = "q";
-        icon = {
-          string = "";
-        };
-        label = {
-          font = "SF Pro:Semibold:13.0";
-          color = "0xfff2f4f8";
-        };
-        padding_left = 10;
-        padding_right = 10;
-        update_mask = [ "front_app_switched" ];
-      };
-    };
+    center_left = { };
 
     right = {
-      clock = {
-        type = "clock";
-        position = "r";
-        label = {
-          font = "SF Mono:Regular:12.0";
-          color = "0xffc7cdd9";
-        };
-        update_interval = 1;
-        update_mask = [ "scroll.tick" ];
-        padding_left = 8;
-        padding_right = 8;
-      };
-
-      volume = {
-        type = "volume";
-        position = "r";
-        icon_strip = [ "󰕿" "󰖀" "󰕾" ];
-        icon = {
-          font = "SF Pro:Regular:13.0";
-        };
-        padding_left = 5;
-        padding_right = 5;
-        update_mask = [ "volume_changed" "mute_changed" ];
-      };
-
+      /* No icons here beyond the bar's own vector glyphs, so the metrics
+         read as a calm group of numbers. */
       battery = {
+        order = 10;          # battery
         type = "battery";
         position = "r";
-        icon_strip = [
-          "󰂎" "󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹"
-        ];
-        padding_left = 5;
-        padding_right = 5;
+        label = {
+          font = "SF Pro:Medium:12.0";
+          color = "0xfff2f4f8";
+        };
+        padding_left = 4;
+        padding_right = 12;
         update_mask = [ "power_changed" ];
       };
 
-      wifi = {
-        type = "wifi";
+      volume = {
+        order = 20;          # volume
+        type = "volume";
         position = "r";
-        icon = {
-          string = "󰤨";
+        label = {
+          font = "SF Pro:Medium:12.0";
+          color = "0xfff2f4f8";
         };
-        padding_left = 6;
-        padding_right = 6;
-        update_mask = [ "wifi_changed" ];
+        padding_left = 4;
+        padding_right = 12;
+        update_mask = [ "volume_changed" "mute_changed" ];
       };
 
-      media = {
-        type = "media";
+      clock = {
+        order = 30;          # clock
+        type = "clock";
         position = "r";
-        icon = {
-          string = "󰎆";
-        };
+        format = "%d/%m %H:%M";
         label = {
-          font = "SF Pro:Regular:12.0";
-          color = "0xffc7cdd9";
+          font = "SF Mono:Medium:12.0";
+          color = "0xfff2f4f8";
         };
-        padding_left = 6;
-        padding_right = 6;
-        update_mask = [ "media_changed" "front_app_switched" ];
+        padding_left = 2;
+        padding_right = 12;
+        update_interval = 60;
+        update_mask = [ "scroll.tick" ];
       };
     };
 

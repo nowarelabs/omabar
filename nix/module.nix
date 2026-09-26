@@ -232,6 +232,31 @@ let
       default = null;
       description = "Highlighted icon color used for selected spaces.";
     };
+    options.space_gap = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Gap in points between space component chips; null inherits the theme.";
+    };
+    options.format = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "strftime format for a clock item; null inherits the theme.";
+    };
+    options.divider_width = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Divider thickness in points for a divider item; null inherits the theme.";
+    };
+    options.divider_color = mkOption {
+      type = types.nullOr colorType;
+      default = null;
+      description = "Divider color (hex, AARRGGBB) for a divider item; null inherits the theme.";
+    };
+    options.order = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Sort key for items inside a bar section; lower comes first.";
+    };
     options.selected_background = mkOption {
       type = types.nullOr (types.submodule {
         options.color = mkOption {
@@ -426,6 +451,24 @@ in
         type = types.str;
         default = theme.bar.color;
         description = "Bar background color (hex, e.g. 0x00000000).";
+      };
+
+      corner_radius = mkOption {
+        type = types.int;
+        default = theme.bar.corner_radius;
+        description = "Bar corner radius in points; 0 = square corners.";
+      };
+
+      border_width = mkOption {
+        type = types.int;
+        default = theme.bar.border_width;
+        description = "Bar border width in points; 0 = no border.";
+      };
+
+      border_color = mkOption {
+        type = types.str;
+        default = theme.bar.border_color;
+        description = "Bar border color (hex, e.g. 0x00000000).";
       };
 
       shadow = mkOption {

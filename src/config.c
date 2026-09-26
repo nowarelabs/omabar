@@ -408,6 +408,18 @@ static enum bar_item_type parse_item_type(const char *tstr) {
     return BAR_ITEM;
 }
 
+static enum bar_item_kind parse_item_kind(const char *tstr) {
+    if (!tstr) return BAR_KIND_GENERIC;
+    if (strcmp(tstr, "clock") == 0) return BAR_KIND_CLOCK;
+    if (strcmp(tstr, "battery") == 0) return BAR_KIND_BATTERY;
+    if (strcmp(tstr, "volume") == 0) return BAR_KIND_VOLUME;
+    if (strcmp(tstr, "wifi") == 0) return BAR_KIND_WIFI;
+    if (strcmp(tstr, "media") == 0) return BAR_KIND_MEDIA;
+    if (strcmp(tstr, "front_app") == 0) return BAR_KIND_FRONT_APP;
+    if (strcmp(tstr, "divider") == 0) return BAR_KIND_DIVIDER;
+    return BAR_KIND_GENERIC;
+}
+
 static enum bar_item_position parse_item_position(const char *pstr, enum bar_item_position default_pos) {
     if (!pstr) return default_pos;
     if (strcmp(pstr, "l") == 0 || strcmp(pstr, "left") == 0) return POSITION_LEFT;
@@ -475,6 +487,23 @@ static void parse_item_object(const json_val_t *item_obj,
     const char *type_str = json_get_str(item_obj, "type", NULL);
     enum bar_item_type itype = parse_item_type(type_str);
     bar_item_set_type(item, itype);
+    item->kind = parse_item_kind(type_str);
+
+    /* strftime format for clock-style items */
+    const char *fmt_str = json_get_str(item_obj, "format", NULL);
+    if (fmt_str) {
+        free(item->format);
+        item->format = strdup(fmt_str);
+    }
+
+    /* divider hairline */
+    int div_w = (int)json_get_num(item_obj, "divider_width", 1);
+    if (div_w > 0) item->divider_width = div_w;
+    const char *div_col = json_get_str(item_obj, "divider_color", NULL);
+    if (div_col) {
+        struct color dc = color_from_hex_string(div_col);
+        if (color_is_valid(dc)) item->divider_color = dc;
+    }
 
     const char *pos_str = json_get_str(item_obj, "position", NULL);
     item->position = parse_item_position(pos_str, default_pos);
@@ -542,6 +571,10 @@ static void parse_item_object(const json_val_t *item_obj,
         bar_item_set_icon_strip(item, strip, count);
         free(strip);
     }
+
+    /* Space component: gap between chips in a multi-space strip */
+    int space_gap = (int)json_get_num(item_obj, "space_gap", 4);
+    if (space_gap >= 0) item->space_gap = space_gap;
 
     /* Update mask */
     json_val_t *umask_obj = json_get_field(item_obj, "update_mask");
@@ -648,17 +681,31 @@ int config_load(const char *path, char *out_lock_file, size_t lock_file_size) {
         int shadow = json_get_bool(bar_obj, "shadow", false) ? 1 : 0;
         bar_manager_set_shadow(&g_bar_manager, shadow);
 
-        /* shadow_color is parsed but not yet applied — window shadow
-           color is controlled by SkyLight private APIs and not yet
-           exposed through the bar_manager setter. Documented as
-           unsupported for this loader; the bar remains visible. */
+        /* shadow_color tints the drop shadow drawn around the bar's
+           rounded container. */
         const char *shadow_col = json_get_str(bar_obj, "shadow_color", NULL);
         if (shadow_col) {
             struct color sc = color_from_hex_string(shadow_col);
-            if (color_is_valid(sc)) {
-                /* stored for future use: bg->shadow.color = sc; */
-            }
+            if (color_is_valid(sc)) bar_manager_set_shadow_color(&g_bar_manager, sc);
         }
+
+        int corner_radius = (int)json_get_num(bar_obj, "corner_radius", 0);
+        bar_manager_set_corner_radius(&g_bar_manager, corner_radius);
+
+        int border_width = (int)json_get_num(bar_obj, "border_width", 0);
+        bar_manager_set_border_width(&g_bar_manager, border_width);
+
+        const char *border_col = json_get_str(bar_obj, "border_color", NULL);
+        if (border_col) {
+            struct color bc = color_from_hex_string(border_col);
+            if (color_is_valid(bc)) bar_manager_set_border_color(&g_bar_manager, bc);
+        }
+
+        int notch_width = (int)json_get_num(bar_obj, "notch_width", 0);
+        if (notch_width > 0) bar_manager_set_notch_width(&g_bar_manager, notch_width);
+
+        int notch_offset = (int)json_get_num(bar_obj, "notch_offset", 0);
+        if (notch_offset != 0) bar_manager_set_notch_offset(&g_bar_manager, notch_offset);
 
         int sticky = json_get_bool(bar_obj, "sticky", true) ? 1 : 0;
         bar_manager_set_sticky(&g_bar_manager, sticky);

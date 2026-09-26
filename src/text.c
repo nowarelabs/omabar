@@ -88,6 +88,11 @@ void text_set_highlight_color(struct text *text, struct color color) {
     text->highlight_color = color;
 }
 
+void text_set_highlighted(struct text *text, int on) {
+    if (!text) return;
+    text->highlighted = on ? 1 : 0;
+}
+
 void text_set_background(struct text *text, int enabled, struct color color) {
     if (!text) return;
     text->has_background = enabled;
@@ -127,18 +132,24 @@ void text_draw(struct text *text, CGContextRef ctx, CGRect frame) {
     CGFloat x = frame.origin.x + text->x_offset;
     CGFloat y = frame.origin.y + text->y_offset + text->line.descent;
 
+    /* while highlighted the glyph is drawn in highlight_color, so a selected
+       chip on a light fill can carry dark text */
+    const struct color *fg = &text->color;
+    if (text->highlighted && color_is_valid(text->highlight_color))
+        fg = &text->highlight_color;
+
     if (text->has_shadow) {
         CGContextSetRGBFillColor(ctx, 0.0f, 0.0f, 0.0f,
-                                 0.5f * text->color.a);
+                                 0.5f * fg->a);
         CGContextSetTextPosition(ctx, x + 1.0f, y - 1.0f);
         CTLineDraw(text->line.line, ctx);
     }
 
     CGContextSetRGBFillColor(ctx,
-                             text->color.r,
-                             text->color.g,
-                             text->color.b,
-                             text->color.a);
+                             fg->r,
+                             fg->g,
+                             fg->b,
+                             fg->a);
     CGContextSetTextPosition(ctx, x, y);
     CTLineDraw(text->line.line, ctx);
 

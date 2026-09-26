@@ -193,6 +193,9 @@ static void make_full_config(const char *path) {
             "\"margin\":7,"
             "\"blur_radius\":12,"
             "\"color\":\"0x80112233\","
+            "\"corner_radius\":14,"
+            "\"border_width\":2,"
+            "\"border_color\":\"0xcc00ff00\","
             "\"shadow\":false,"
             "\"shadow_color\":\"0x40000000\","
             "\"sticky\":false,"
@@ -202,12 +205,28 @@ static void make_full_config(const char *path) {
         "},"
         "\"defaults\":{\"padding_left\":4,\"padding_right\":9},"
         "\"items\":{"
+            "\"center\":["
+                "{"
+                    "\"name\":\"clock\","
+                    "\"type\":\"clock\","
+                    "\"position\":\"c\","
+                    "\"format\":\"%H:%M:%S\""
+                "},"
+                "{"
+                    "\"name\":\"sep\","
+                    "\"type\":\"divider\","
+                    "\"position\":\"c\","
+                    "\"divider_width\":3,"
+                    "\"divider_color\":\"0x80ff00ff\""
+                "}"
+            "],"
             "\"center_right\":["
                 "{"
                     "\"name\":\"spaces\","
                     "\"type\":\"space\","
                     "\"position\":\"e\","
                     "\"icon_strip\":[\"a\",\"b\"],"
+                    "\"space_gap\":7,"
                     "\"background\":{\"color\":\"0x11223344\",\"corner_radius\":3},"
                     "\"selected_background\":{\"color\":\"0x44ff0000\",\"corner_radius\":4},"
                     "\"click_enabled\":false,"
@@ -249,6 +268,14 @@ static int test_full_config(void) {
     check_int("bar y_offset = -3", g_bar_manager.y_offset, -3);
     check_int("bar alpha = 0.5", (int)(g_bar_manager.alpha * 10), 5);
     check("bar color applied", g_bar_manager.default_item.background.color.a > 0.0f);
+    check_int("bar corner_radius = 14", g_bar_manager.corner_radius, 14);
+    check_int("bar border_width = 2", g_bar_manager.border_width, 2);
+    /* 0xcc00ff00 is AARRGGBB: opaque-ish green */
+    check("bar border_color applied",
+          g_bar_manager.border_color.g > 0.9f
+          && g_bar_manager.border_color.r < 0.1f
+          && g_bar_manager.border_color.a > 0.7f);
+    check("bar shadow_color applied", g_bar_manager.shadow_color.a > 0.0f);
 
     struct bar_item *item = NULL;
     for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
@@ -276,6 +303,45 @@ static int test_full_config(void) {
               (item->update_mask & UPDATE_DISPLAY_ADDED) != 0);
         check_int("spaces padding_left from defaults", item->padding_left, 4);
         check_int("spaces padding_right from defaults", item->padding_right, 9);
+        check_int("spaces space_gap = 7", item->space_gap, 7);
+    }
+
+    /* semantic kinds and their per-kind options */
+    struct bar_item *clock = NULL, *sep = NULL;
+    for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
+        struct bar_item *it = g_bar_manager.bar_items[i];
+        if (!it || !it->name) continue;
+        if (strcmp(it->name, "clock") == 0) clock = it;
+        if (strcmp(it->name, "sep") == 0) sep = it;
+    }
+    check("clock item present", clock != NULL);
+    if (clock) {
+        check_int("clock kind = CLOCK", clock->kind, BAR_KIND_CLOCK);
+        check("clock format parsed",
+              clock->format && strcmp(clock->format, "%H:%M:%S") == 0);
+    }
+    check("divider item present", sep != NULL);
+    if (sep) {
+        check_int("divider kind = DIVIDER", sep->kind, BAR_KIND_DIVIDER);
+        check_int("divider width = 3", sep->divider_width, 3);
+        check("divider color applied",
+              sep->divider_color.b > 0.9f && sep->divider_color.a > 0.4f);
+    }
+
+    /* Regression: measuring an item must not mutate the text offsets. Folding
+       padding and icon widths into them on every pass used to compound, so a
+       relayout pushed content out of its own background. */
+    if (clock) {
+        int icon_xo = clock->icon.x_offset;
+        int label_xo = clock->label.x_offset;
+        CGRect first = bar_item_calculate_bounds(clock);
+        CGRect second = bar_item_calculate_bounds(clock);
+        check_int("clock icon x_offset stable across relayouts",
+                  clock->icon.x_offset, icon_xo);
+        check_int("clock label x_offset stable across relayouts",
+                  clock->label.x_offset, label_xo);
+        check("clock measured width stable across relayouts",
+              first.size.width == second.size.width);
     }
 
     (void)remove(path);
@@ -460,7 +526,8 @@ int main(int argc, char *argv[]) {
         if (result == 0) {
             tests_run++; tests_passed++;
             printf("  PASS: main config loaded successfully\n");
-            check_int("main config bar height", g_bar_manager.height, 38);
+            /* tracks the shipped default theme (nix/default-theme.nix) */
+            check_int("main config bar height", g_bar_manager.height, 44);
             check_int("main config bar position", g_bar_manager.position, 0);
             check_nonzero("main config items added", g_bar_manager.bar_item_count);
             check_nonzero("main config lock_file set", lock_file[0] != '\0');

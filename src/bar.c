@@ -1,14 +1,41 @@
 #include "bar.h"
 #include "bar_manager.h"
 #include "display.h"
+#include "display_nsscreen.h"
 #include "misc/extern.h"
 #include "misc/helpers.h"
+#include <math.h>
 #include <stdlib.h>
 
 extern struct bar_manager g_bar_manager;
 
+/* Apply the bar-level shape/style settings on top of the inherited default
+   item background, turning the bar into a floating rounded container
+   without touching per-item styling. Bars are created before the config is
+   read, so this is re-applied on every draw rather than only at creation. */
+void bar_sync_background(struct bar *bar) {
+    if (!bar) return;
+    bar->background.corner_radius = g_bar_manager.corner_radius;
+    bar->background.border_width = g_bar_manager.border_width;
+    if (g_bar_manager.border_width > 0)
+        bar->background.border_color = g_bar_manager.border_color;
+    if (color_is_valid(g_bar_manager.shadow_color)) {
+        bar->background.shadow.color = g_bar_manager.shadow_color;
+        bar->background.has_shadow = 1;
+    }
+}
+
 CGRect bar_get_frame(struct bar *bar) {
-    int bar_notch_offset = display_has_notch(bar->did) ? g_bar_manager.notch_offset : 0;
+    int bar_notch_offset = 0;
+    if (display_has_notch(bar->did)) {
+        if (g_bar_manager.notch_offset > 0) {
+            bar_notch_offset = g_bar_manager.notch_offset;
+        } else if (g_bar_manager.position == 0) {
+            /* No explicit override: drop a top bar below the camera housing /
+               menu bar so a floating, rounded container is never clipped. */
+            bar_notch_offset = (int)lrint(display_nsscreen_top_inset(bar->did));
+        }
+    }
 
     CGRect bounds = display_bounds(bar->did);
     CGPoint origin = bounds.origin;
@@ -79,6 +106,8 @@ struct bar *bar_create(unsigned int did) {
     bar->hidden = 0;
     bar->mouse_over = 0;
     bar->background = g_bar_manager.default_item.background;
+    bar_sync_background(bar);
+
     bar->x_offset = 0;
 
     bar_create_window(bar);
@@ -143,6 +172,35 @@ bool bar_draws_item(struct bar *bar, struct bar_item *bar_item) {
     return true;
 }
 
+/* Refresh the cached chip list of a space item from the spaces currently
+   managed on this bar's display. Items that pin an explicit space_id keep
+   rendering as a single chip. */
+static void bar_item_sync_spaces(struct bar_item *item, struct bar *bar) {
+    if (!item || !bar) return;
+
+    if (item->space_id > 0) {
+        item->space_count = 1;
+        item->space_ids[0] = item->space_id;
+        return;
+    }
+
+    int count = 0;
+    uint64_t *ids = display_space_list(bar->did, &count);
+    if (!ids || count < 1) {
+        buf_free(ids);
+        item->space_count = 1;
+        item->space_ids[0] = bar->sid;
+        return;
+    }
+
+    if (count > OMABAR_MAX_SPACES) count = OMABAR_MAX_SPACES;
+    for (int i = 0; i < count; i++) item->space_ids[i] = ids[i];
+    item->space_count = count;
+    /* the list is a buf_ array, so it has to be released through its
+       header rather than with a plain free() of the data pointer */
+    buf_free(ids);
+}
+
 /* Update space components associated with this bar to reflect the bar's
    current space: exactly one chip is selected and the rest are not. */
 void bar_sync_space_items(struct bar *bar) {
@@ -154,13 +212,44 @@ void bar_sync_space_items(struct bar *bar) {
         if (item->associated_display > 0
             && !(item->associated_display & (1 << bar->adid)))
             continue;
-        bar_item_set_selected(item, item->space_id == bar->sid);
+        bar_item_sync_spaces(item, bar);
+        /* Single-chip items track selection off their own space_id; a strip
+           item is selected when its own space list contains the bar's space. */
+        bool selected = false;
+        for (int s = 0; s < item->space_count; s++) {
+            if (item->space_ids[s] == bar->sid) selected = true;
+        }
+        /* Never present a strip with nothing highlighted: if the current space
+           is not in the list (a stale id, or a space created moments ago),
+           fall back to the first chip so the bar still reads as a switcher. */
+        if (!selected && item->space_count > 0) {
+            item->space_ids[0] = bar->sid;
+            selected = true;
+        }
+        bar_item_set_selected(item, selected);
     }
 }
 
 void bar_calculate_bounds(struct bar *bar) {
     if (!bar) return;
     if (bar->adid < 1) return;
+
+    /* The space strip is populated lazily: the managed-space list is only
+       meaningful once a bar exists for a display, and querying it costs an
+       IPC round trip, so do it once here instead of on every frame. Space
+       changes keep the cache current through bar_sync_space_items(). */
+    if (!bar->spaces_synced) {
+        bar->spaces_synced = 1;
+        /* bar_create() runs before the SkyLight connection is usable, so the
+           space it captured back then can be 0. Re-read it now that the
+           managed-space query is known to work. */
+        uint64_t sid = display_space_id(bar->did);
+        if (sid) {
+            bar->sid = sid;
+            bar->dsid = display_space_display_id(sid);
+        }
+        bar_sync_space_items(bar);
+    }
 
     bool has_notch = display_has_notch(bar->did);
     uint32_t notch_width = has_notch ? (uint32_t)g_bar_manager.notch_width : 0;
@@ -258,8 +347,18 @@ void bar_draw(struct bar *bar) {
     /* bar.alpha is the user-facing opacity knob; keep the window in sync. */
     window_set_alpha(bar->window, g_bar_manager.alpha);
 
+    bar_sync_background(bar);
+
     CGContextRef ctx = bar->window->context;
     CGRect frame = bar->window->frame;
+
+    /* All item layout below is expressed top-down (frames start at y=0 and
+       grow downward, text baselines use +descent), but a bitmap context is
+       y-up by default. Flip once here so the whole bar draws the way the
+       layout code — and popups anchored at the bottom edge — expect. */
+    CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx, 0.0, frame.size.height);
+    CGContextScaleCTM(ctx, 1.0, -1.0);
 
     /* clear the window back to transparent */
     CGContextSaveGState(ctx);
@@ -273,15 +372,17 @@ void bar_draw(struct bar *bar) {
         background_draw(&bar->background, ctx, bg_frame);
     }
 
-    /* draw each visible item at its computed position */
+    /* draw each visible item at its computed position, with the fixed-height
+       content row centred inside the bar */
     struct bar_manager *bm = &g_bar_manager;
+    float row_y = (frame.size.height - (float)BAR_ITEM_ROW_HEIGHT) / 2.0f;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
         if (!item || !bar_draws_item(bar, item)) continue;
 
         /* save, translate to item's slot plus scroll displacement, draw, restore */
         CGContextSaveGState(ctx);
-        CGContextTranslateCTM(ctx, item->x + item->scroll_offset, 0);
+        CGContextTranslateCTM(ctx, item->x + item->scroll_offset, row_y);
         bar_item_draw(item, bar, ctx);
         CGContextRestoreGState(ctx);
     }
@@ -312,4 +413,5 @@ void bar_draw(struct bar *bar) {
     }
 
     CGContextFlush(ctx);
+    CGContextRestoreGState(ctx);
 }

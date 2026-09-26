@@ -33,6 +33,13 @@ struct bar_manager {
     int y_offset;
     double alpha;
 
+    /* bar container shape: makes the bar a floating rounded container
+       rather than a full-bleed strip. 0 corner_radius = square. */
+    int corner_radius;
+    int border_width;
+    struct color border_color;
+    struct color shadow_color;
+
     /* state */
     int frozen;
     int sleeps;
@@ -70,6 +77,10 @@ void bar_manager_set_notch_width(struct bar_manager *bm, int width);
 void bar_manager_set_notch_offset(struct bar_manager *bm, int offset);
 void bar_manager_set_y_offset(struct bar_manager *bm, int offset);
 void bar_manager_set_alpha(struct bar_manager *bm, double alpha);
+void bar_manager_set_corner_radius(struct bar_manager *bm, int radius);
+void bar_manager_set_border_color(struct bar_manager *bm, struct color color);
+void bar_manager_set_border_width(struct bar_manager *bm, int width);
+void bar_manager_set_shadow_color(struct bar_manager *bm, struct color color);
 void bar_manager_set_background_color(struct bar_manager *bm, struct color color);
 
 #endif

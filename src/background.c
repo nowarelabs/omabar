@@ -121,15 +121,30 @@ void background_draw(struct background *bg, CGContextRef ctx, CGRect bounds) {
     background_bounds.origin.y += bg->y_offset;
 
     if (bg->has_shadow) {
-        CGRect shadow_bounds = shadow_get_bounds(&bg->shadow,
-                                                 background_bounds);
+        /* Cast a real blurred drop shadow: CoreGraphics shadows whatever is
+           filled while one is set, so fill the same shape in the shadow
+           colour with the shadow active, then draw the real fill on top. */
+        /* blur tracks the drop distance so a larger offset reads softer */
+        CGFloat blur = 4.0;
+        if (bg->shadow.distance > 0.0) blur = (CGFloat)bg->shadow.distance * 2.0;
+
+        CGContextSaveGState(ctx);
+        CGColorRef shadow_cg = CGColorCreateGenericRGB(bg->shadow.color.r,
+                                                       bg->shadow.color.g,
+                                                       bg->shadow.color.b,
+                                                       bg->shadow.color.a);
+        CGContextSetShadowWithColor(ctx, CGSizeMake(bg->shadow.offset.x,
+                                                    bg->shadow.offset.y),
+                                    blur, shadow_cg);
+        CGColorRelease(shadow_cg);
         if (bg->type == 1) {
-            draw_ellipse(ctx, shadow_bounds, &bg->shadow.color,
-                         &bg->shadow.color, bg->border_width);
+            draw_ellipse(ctx, background_bounds, &bg->shadow.color,
+                         &bg->shadow.color, 0);
         } else {
-            draw_rect(ctx, shadow_bounds, &bg->shadow.color,
-                      bg->corner_radius, bg->border_width, &bg->shadow.color);
+            draw_rect(ctx, background_bounds, &bg->shadow.color,
+                      bg->corner_radius, 0, &bg->shadow.color);
         }
+        CGContextRestoreGState(ctx);
     }
 
     if (bg->type == 1) {

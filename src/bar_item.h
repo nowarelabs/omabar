@@ -36,6 +36,11 @@ struct window;
 #define UPDATE_DAEMON_MESSAGE   (1ULL << 19)
 #define UPDATE_DND              (1ULL << 20)
 
+/* Height of the content row an item draws into, in points. Every item's
+   icon/label/component flow is laid out against this box, and the bar
+   centres the row vertically. */
+#define BAR_ITEM_ROW_HEIGHT 30
+
 enum bar_item_type {
     BAR_ITEM,
     BAR_COMPONENT_SPACE,
@@ -43,6 +48,20 @@ enum bar_item_type {
     BAR_COMPONENT_GROUP,
     BAR_COMPONENT_GRAPH,
     BAR_COMPONENT_SLIDER
+};
+
+/* Semantic meaning of a plain item, taken from the config `type` field.
+   Lets the bar fill in content (clock, charge, volume, ...) on its own
+   instead of requiring a script for every value. */
+enum bar_item_kind {
+    BAR_KIND_GENERIC = 0,
+    BAR_KIND_CLOCK,
+    BAR_KIND_BATTERY,
+    BAR_KIND_VOLUME,
+    BAR_KIND_WIFI,
+    BAR_KIND_MEDIA,
+    BAR_KIND_FRONT_APP,
+    BAR_KIND_DIVIDER
 };
 
 enum bar_item_position {
@@ -84,8 +103,20 @@ struct bar_item {
     char **icon_strip;
     int icon_strip_count;
 
+    /* A space item with no explicit space_id renders one chip per space on
+       the bar's display. The chip list is cached here (fixed capacity, no
+       allocation) so width measurement works without a bar reference. */
+    #define OMABAR_MAX_SPACES 16
+    int space_count;
+    uint64_t space_ids[OMABAR_MAX_SPACES];
+    int space_gap;
+
     char *script;
     char *click_script;
+    char *format;        /* strftime format, used by clock items */
+    enum bar_item_kind kind;
+    int divider_width;   /* divider items: hairline thickness in points */
+    struct color divider_color;
     void *mach_helper;
 
     int hidden;
@@ -119,6 +150,7 @@ float bar_item_get_length(struct bar_item *item);
 void bar_item_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx);
 CGRect bar_item_calculate_bounds(struct bar_item *item);
 void bar_item_update(struct bar_item *item, const char *sender, const char *info);
+void bar_item_apply_builtin_content(struct bar_item *item);
 void bar_item_on_click(struct bar_item *item, uint32_t button, uint32_t modifier, CGPoint point);
 void bar_item_on_drag(struct bar_item *item, CGPoint point);
 void bar_item_cancel_drag(struct bar_item *item);
@@ -179,6 +211,7 @@ void bar_item_set_icon_strip(struct bar_item *item, char **strip, int count);
 void bar_item_set_space_id(struct bar_item *item, uint64_t sid);
 void bar_item_set_selected(struct bar_item *item, int selected);
 int  bar_item_space_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx, CGRect frame);
-void bar_item_space_clicked(struct bar_item *item);
+void bar_item_space_clicked(struct bar_item *item, CGPoint point);
+float bar_item_space_row_width(struct bar_item *item);
 
 #endif

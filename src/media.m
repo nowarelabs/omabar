@@ -103,7 +103,7 @@ struct media_info *media_get_info(void) {
     struct media_info *info = calloc(1, sizeof(*info));
     if (!info) return NULL;
 
-    info->app = strdup("unknown");
+    info->app = strdup("");
     info->title = strdup("");
     info->artist = strdup("");
     info->album = strdup("");

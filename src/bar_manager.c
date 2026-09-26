@@ -648,6 +648,11 @@ int bar_manager_add_item(struct bar_manager *bm, struct bar_item *item) {
     if (bar_manager_find_item(bm, item->name)) return 1;
     buf_push(bm->bar_items, item);
     bm->bar_item_count = (int)buf_len(bm->bar_items);
+    /* Give built-in kinds (clock, battery, volume, ...) a value straight
+       away, so they are correct on the very first frame instead of waiting
+       for the first event that happens to match their update mask. */
+    bar_item_apply_builtin_content(item);
+    bar_item_calculate_bounds(item);
     bm->bar_needs_update = 1;
     return 0;
 }
@@ -817,6 +822,40 @@ void bar_manager_set_y_offset(struct bar_manager *bm, int offset) {
 void bar_manager_set_alpha(struct bar_manager *bm, double alpha) {
     if (bm->alpha == alpha) return;
     bm->alpha = alpha;
+    bm->bar_needs_update = 1;
+}
+
+void bar_manager_set_corner_radius(struct bar_manager *bm, int radius) {
+    if (!bm || radius < 0) return;
+    if (bm->corner_radius == radius) return;
+    bm->corner_radius = radius;
+    bm->bar_needs_update = 1;
+}
+
+void bar_manager_set_border_color(struct bar_manager *bm, struct color color) {
+    if (!bm || !color_is_valid(color)) return;
+    if (color_is_valid(bm->border_color)
+        && bm->border_color.r == color.r && bm->border_color.g == color.g
+        && bm->border_color.b == color.b && bm->border_color.a == color.a)
+        return;
+    bm->border_color = color;
+    bm->bar_needs_update = 1;
+}
+
+void bar_manager_set_border_width(struct bar_manager *bm, int width) {
+    if (!bm || width < 0) return;
+    if (bm->border_width == width) return;
+    bm->border_width = width;
+    bm->bar_needs_update = 1;
+}
+
+void bar_manager_set_shadow_color(struct bar_manager *bm, struct color color) {
+    if (!bm || !color_is_valid(color)) return;
+    if (color_is_valid(bm->shadow_color)
+        && bm->shadow_color.r == color.r && bm->shadow_color.g == color.g
+        && bm->shadow_color.b == color.b && bm->shadow_color.a == color.a)
+        return;
+    bm->shadow_color = color;
     bm->bar_needs_update = 1;
 }
 
