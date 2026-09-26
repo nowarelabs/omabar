@@ -869,14 +869,17 @@ in
           <array>
             <string>/bin/sh</string>
             <string>-c</string>
-            <string>/bin/wait4path /nix/store &amp;&amp; exec ${pkgs.omabar}/bin/omabar</string>
+            <!-- The config path must be passed as --config: omabar only ever
+                 reads it from argv (src/main.c), never from the environment.
+                 getenv() is called solely for HOME and USER, so setting
+                 OMABAR_CONFIG_FILE here silently did nothing and the daemon
+                 booted on its built-in defaults -- margin 0, height 40, no
+                 corner radius, no border -- which is why the bar rendered as
+                 a full-bleed dark strip instead of a floating pill. -->
+            <string>/bin/wait4path /nix/store &amp;&amp; exec ${lib.escapeShellArg "${pkgs.omabar}/bin/omabar"} --config ${lib.escapeShellArg (if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile)}</string>
           </array>
           <key>EnvironmentVariables</key>
           <dict>
-            <key>OMABAR_CONFIG_FILE</key>
-            <string>${if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile}</string>
-            <key>OMABAR_DEFAULT_FONT</key>
-            <string>${lib.escapeXML cfg.fonts.default}</string>
             <key>PATH</key>
             <string>${lib.makeBinPath [ pkgs.coreutils pkgs.findutils ]}:${pkgs.omabar}/bin</string>
           </dict>
