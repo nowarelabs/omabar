@@ -515,7 +515,7 @@ in
 
       y_offset = mkOption {
         type = types.int;
-        default = 0;
+        default = theme.bar.y_offset;
         description = "Vertical offset of the bar in points.";
       };
 
