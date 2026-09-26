@@ -16,7 +16,10 @@ let
   # will not accept a store path. ~/Applications is the conventional place for
   # a per-user app that needs a permission grant, and because the copy is signed
   # with a build-independent identifier the grant survives rebuilds.
-  omabarAppDir = "${config.home.homeDirectory}/Applications";
+  # This is a nix-darwin module, so there is no Home Manager `home` option in
+  # scope; resolve the primary user's home from nix-darwin's own user config.
+  primaryUser = config.system.primaryUser;
+  omabarAppDir = "${primaryUser.home}/Applications";
   omabarApp = "${omabarAppDir}/Omabar.app";
   omabarBin = "${omabarApp}/Contents/MacOS/Omabar";
 
@@ -868,7 +871,7 @@ in
     # on every rebuild, failing (b) as well. Copying the signed bundle to
     # ~/Applications fixes both. The copy keeps its build-independent signing
     # identity, so the grant made against it keeps working across rebuilds.
-    system.activationScripts.omabarApp = lib.mkIf (cfg.enable && config.system.primaryUser != null) {
+    system.activationScripts.omabarApp = lib.mkIf (cfg.enable && primaryUser != null) {
       text = ''
         target="${omabarApp}"
         source="${pkgs.omabar}/Applications/Omabar.app"
@@ -912,7 +915,7 @@ in
     # is copied into the primary user's ~/Library/LaunchAgents and loaded with
     # `launchctl asuser <uid> sudo --user=<user> launchctl load`, which puts it
     # in that user's GUI session.
-    environment.userLaunchAgents = lib.mkIf (cfg.enable && config.system.primaryUser != null) {
+    environment.userLaunchAgents = lib.mkIf (cfg.enable && primaryUser != null) {
       omabar.source = pkgs.writeText "org.nixos.omabar.plist" ''
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
