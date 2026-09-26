@@ -860,6 +860,16 @@ in
         KeepAlive = false;
         ProcessType = "Interactive";
         ThrottleInterval = 1;
+        # The daemon forks and lets its parent _exit(0) (see daemonize() in
+        # src/main.c, which deliberately avoids setsid() so the child stays in
+        # the user's GUI session for CFPreferences). launchd treats that parent
+        # exit as the job finishing and, with the default
+        # AbandonProcessGroup = false, tears down the whole process group --
+        # killing the daemon on its first tick. The job then sits at
+        # "not running, last exit code 0" with no process and no error.
+        # Abandoning the group leaves the forked child alive as launchd
+        # intended; KeepAlive is already false, so nothing reaps it.
+        AbandonProcessGroup = true;
       } // (lib.optionalAttrs cfg.daemon.hotload {
         WatchPaths = [ "/etc/omabar_config" ];
       });
