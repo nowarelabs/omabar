@@ -880,8 +880,13 @@ in
           </array>
           <key>EnvironmentVariables</key>
           <dict>
+            <!-- fork_exec() runs "/usr/bin/env sh -c <script>", so both `sh`
+                 and the commands in a click_script are resolved through PATH.
+                 A nix-only PATH left sh, open and osascript unresolvable, so
+                 every click script failed silently. Keep the system paths
+                 launchd would normally supply. -->
             <key>PATH</key>
-            <string>${lib.makeBinPath [ pkgs.coreutils pkgs.findutils ]}:${pkgs.omabar}/bin</string>
+            <string>${lib.makeBinPath [ pkgs.coreutils pkgs.findutils ]}:${pkgs.omabar}/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
           </dict>
           <key>RunAtLoad</key>
           <true/>

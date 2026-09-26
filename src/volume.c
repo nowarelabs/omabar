@@ -1,6 +1,7 @@
 #include "volume.h"
 #include "event.h"
 #include <CoreAudio/CoreAudio.h>
+#include <math.h>
 #include <stdlib.h>
 
 static AudioObjectPropertyAddress kHardwareDevicePropertyAddress = {
@@ -189,7 +190,13 @@ int volume_get_percentage(void) {
                                                      &kVolumeMainPropertyAddress,
                                                      0, NULL, &size, &volume);
         if (status == noErr) {
-            g_percentage_cache = (int)(volume * 100.0f);
+            /* Round, don't truncate. CoreAudio hands back the exact scalar the
+               system UI uses, and that UI rounds: 0.875 must read 88, while
+               (int)(0.875 * 100) truncated to 87 and showed a volume one
+               point below what the user set. */
+            g_percentage_cache = (int)lroundf(volume * 100.0f);
+            if (g_percentage_cache < 0) g_percentage_cache = 0;
+            if (g_percentage_cache > 100) g_percentage_cache = 100;
             return g_percentage_cache;
         }
     }

@@ -8,6 +8,8 @@
 #include "ipc.h"
 #include "plugin.h"
 #include "mouse.h"
+#include "volume.h"
+#include "power.h"
 #include "misc/helpers.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <stdio.h>
@@ -225,7 +227,14 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
     }
 
     if (animating || item_updated)
-        bar_manager_refresh(bm);
+        /* Must flag the redraw: bar_manager_refresh() only runs its draw pass
+           when bar_needs_update is set, and this handler was the only one
+           calling refresh() without setting it. The clock, media and the
+           once-a-second space re-sync all recompute their values here, so
+           without the flag they updated in memory and never repainted — the
+           bar stayed on the values painted by the very first frame. */
+        bar_manager_set_needs_update(bm);
+    bar_manager_refresh(bm);
 }
 
 static CGPoint bar_manager_local_point(struct bar *bar, struct bar_item *item,
@@ -563,6 +572,14 @@ void bar_manager_begin(struct bar_manager *bm) {
     animation_begin(&bm->animator);
     dnd_init();
 
+    /* CoreAudio / IOKit property listeners. These were never called, so no
+       EVENT_VOLUME_CHANGED or EVENT_POWER_CHANGED was ever posted: the volume
+       and battery items subscribe to nothing but those two masks and ship
+       with update_interval 0, so they had no update path at all and stayed on
+       whatever they first read at startup. */
+    volume_begin();
+    power_begin();
+
     plugin_init();
     socket_daemon_begin_un();
 
@@ -588,6 +605,9 @@ void bar_manager_begin(struct bar_manager *bm) {
 void bar_manager_destroy(struct bar_manager *bm) {
     socket_daemon_end();
     plugin_destroy();
+
+    volume_end();
+    power_end();
 
     for (int i = 0; i < bm->bar_count; i++)
         bar_destroy(bm->bars[i]);
@@ -621,6 +641,11 @@ void bar_manager_refresh(struct bar_manager *bm) {
             CGRect frame = bar_get_frame(bar);
             window_set_frame(bar->window, frame.origin.x, frame.origin.y,
                              frame.size.width, frame.size.height);
+            /* The tracking area was assigned once in bar_create_window() from
+               the pre-config frame. Without this it stayed at the old
+               geometry after every resize, so the region the window server
+               reports as hovered was offset from where the bar actually is. */
+            window_assign_mouse_tracking_area(bar->window, frame);
         }
         bm->bar_needs_resize = 0;
         bm->bar_needs_update = 1;
