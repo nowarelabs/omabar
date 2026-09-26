@@ -2,6 +2,7 @@
 #include "misc/helpers.h"
 #include <ApplicationServices/ApplicationServices.h>
 #include <syslog.h>
+#include <unistd.h>
 
 /* types reported to the handler (kept as small ints to stay self-contained) */
 enum {
@@ -77,6 +78,19 @@ static CGEventRef mouse_tap_callback(CGEventTapProxy proxy, CGEventType type,
     return event;
 }
 
+static void mouse_notify_unclickable(void) {
+    /* Best effort: fork off so a missing osascript can never block startup. */
+    pid_t pid = fork();
+    if (pid != 0) return;
+    alarm(5);
+    execlp("osascript", "osascript", "-e",
+           "display notification \"Clicks need Accessibility permission. "
+           "Grant it in System Settings > Privacy & Security > "
+           "Accessibility.\" with title \"Omabar\"",
+           (char *)NULL);
+    _exit(127);
+}
+
 void mouse_begin(mouse_handler_fn handler) {
     if (!handler) return;
     g_handler = handler;
@@ -99,8 +113,9 @@ void mouse_begin(mouse_handler_fn handler) {
                              mouse_tap_callback, NULL);
     if (!g_tap) {
         /* Almost always a missing Accessibility/Input Monitoring grant:
-           CGEventTapCreate returns NULL without it. Say so, because the
-           symptom is otherwise just "the bar is not clickable". */
+           CGEventTapCreate returns NULL without it. The symptom is otherwise
+           just "the bar is not clickable" with no explanation anywhere the
+           user is likely to look, so also raise a notification. */
         const char *msg = "omabar: CGEventTapCreate failed - grant the "
                           "omabar binary Accessibility (or Input "
                           "Monitoring) permission in System Settings > "
@@ -108,6 +123,7 @@ void mouse_begin(mouse_handler_fn handler) {
                           "unclickable";
         fprintf(stderr, "%s\n", msg);
         syslog(LOG_ERR, "%s", msg);
+        mouse_notify_unclickable();
         return;
     }
 

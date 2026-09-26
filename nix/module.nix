@@ -9,6 +9,16 @@ let
 
   configGenerator = import ./config-generator.nix { inherit lib pkgs; };
 
+  # Prefer the signed .app bundle's binary: TCC records an Accessibility grant
+  # against the code signing identity, and only the bundle carries a fixed
+  # `identifier` requirement. A cdhash-keyed identity (the bare ad-hoc binary)
+  # is revoked by every rebuild. Tolerate a package with no bundle so an
+  # overridden `package` keeps working.
+  omabarBin =
+    if builtins.pathExists "${pkgs.omabar}/Applications/Omabar.app/Contents/MacOS/Omabar"
+    then "${pkgs.omabar}/Applications/Omabar.app/Contents/MacOS/Omabar"
+    else "${pkgs.omabar}/bin/omabar";
+
   colorType = types.str; # "0xAARRGGBB" | "#RRGGBB[AA]" | bare hex
 
   fontType = types.submodule {
@@ -876,7 +886,17 @@ in
                  booted on its built-in defaults -- margin 0, height 40, no
                  corner radius, no border -- which is why the bar rendered as
                  a full-bleed dark strip instead of a floating pill. -->
-            <string>/bin/wait4path /nix/store &amp;&amp; exec ${lib.escapeShellArg "${pkgs.omabar}/bin/omabar"} --config ${lib.escapeShellArg (if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile)}</string>
+            <!-- Run the signed .app bundle's binary, not $out/bin/omabar.
+                 Clicks need a CGEventTap, which macOS gates behind
+                 Accessibility, and TCC keys that grant to the code signing
+                 identity. The bare binary is ad-hoc signed, so its identity is
+                 a cdhash of its exact bytes: every rebuild produced a new
+                 hash and silently revoked the previous grant, leaving the bar
+                 permanently unclickable. The bundle is signed with a fixed
+                 `identifier "com.nowarelabs.omabar"` requirement, so one grant
+                 survives rebuilds. Falls back to the bare binary if a caller
+                 overrides the package with one that has no bundle. -->
+            <string>/bin/wait4path /nix/store &amp;&amp; exec ${lib.escapeShellArg omabarBin} --config ${lib.escapeShellArg (if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile)}</string>
           </array>
           <key>EnvironmentVariables</key>
           <dict>
