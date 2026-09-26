@@ -144,6 +144,8 @@
         padding_left = 4;
         padding_right = 12;
         update_mask = [ "power_changed" ];
+        # no OMABC key for popup contents yet, so give the pill a real action
+        click_script = "open x-apple.systempreferences:com.apple.Battery-Settings.extension";
       };
 
       volume = {
@@ -157,6 +159,8 @@
         padding_left = 4;
         padding_right = 12;
         update_mask = [ "volume_changed" "mute_changed" ];
+        # mute toggle, the usual bar behaviour for a volume pill
+        click_script = "osascript -e 'set v to get volume settings' -e 'set volume output muted not (output muted of v)'";
       };
 
       clock = {

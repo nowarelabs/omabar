@@ -29,6 +29,9 @@ extern CGError DisplayServicesAmbientLightCompensationEnabled(
    ═══════════════════════════════════════════════════════════════ */
 extern uint32_t SLSMainConnectionID(void);
 
+/* dlsym against the dlopen'd SkyLight handle; NULL when absent */
+extern void *private_symbol(const char *name);
+
 /* Window creation / lifecycle */
 extern CGError SLSNewWindowWithOpaqueShapeAndContext(
     int cid, int type, CFTypeRef region, CFTypeRef opaque_shape,

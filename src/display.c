@@ -75,6 +75,50 @@ uint64_t display_space_id(CGDirectDisplayID did) {
     return sid;
 }
 
+/* The "Display Identifier" UUID of the managed display that hosts `sid`, as a
+   retained CFStringRef (caller releases), or NULL. macOS 15 identifies a
+   display to SLSManagedDisplaySetCurrentSpace() by this string rather than by
+   a numeric display id. A display hosts a space when the space is in its
+   "Spaces" list or is the one it is currently showing. */
+CFStringRef display_space_display_identifier(uint64_t sid) {
+    if (!sid) return NULL;
+    CFArrayRef managed = SLSCopyManagedDisplaySpaces(g_connection);
+    CFStringRef found = NULL;
+
+    if (managed) {
+        for (CFIndex i = 0; i < CFArrayGetCount(managed) && !found; i++) {
+            CFDictionaryRef info = CFArrayGetValueAtIndex(managed, i);
+            if (!info) continue;
+
+            bool hosts = false;
+
+            CFTypeRef current = CFDictionaryGetValue(info, CURRENT_SPACE_KEY);
+            if (current && CFGetTypeID(current) == CFDictionaryGetTypeID()
+                && display_space_id_from_dict(current) == sid)
+                hosts = true;
+
+            if (!hosts) {
+                CFArrayRef spaces = CFDictionaryGetValue(info,
+                                                         DISPLAY_SPACES_KEY);
+                for (CFIndex j = 0; spaces && j < CFArrayGetCount(spaces); j++) {
+                    CFDictionaryRef space = CFArrayGetValueAtIndex(spaces, j);
+                    if (space && display_space_id_from_dict(space) == sid) {
+                        hosts = true;
+                        break;
+                    }
+                }
+            }
+            if (!hosts) continue;
+
+            CFStringRef uuid = CFDictionaryGetValue(info, DISPLAY_IDENTIFIER_KEY);
+            if (uuid && CFGetTypeID(uuid) == CFStringGetTypeID())
+                found = (CFStringRef)CFRetain(uuid);
+        }
+        CFRelease(managed);
+    }
+    return found;
+}
+
 uint64_t display_space_display_id(uint64_t sid) {
     CGDirectDisplayID result = 0;
     if (!sid) return result;

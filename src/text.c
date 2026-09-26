@@ -66,9 +66,40 @@ static void text_recreate_line(struct text *text) {
     CFRelease(str);
 }
 
+/* Measure a string in a font without disturbing any struct text. Callers that
+   size layout around several candidate strings (the space chips pick their
+   width from the widest label) need this: routing them through text_set_string
+   would leave the shared line state holding whichever label was measured
+   last, making the result depend on call order. */
+float text_measure(struct font *font, const char *str) {
+    if (!font || !font->ct_font || !str) return 0.0f;
+
+    CFStringRef cfstr = CFStringCreateWithCString(NULL, str,
+                                                  kCFStringEncodingUTF8);
+    if (!cfstr) return 0.0f;
+
+    CFMutableAttributedStringRef attr = CFAttributedStringCreateMutable(NULL, 0);
+    CFAttributedStringReplaceString(attr, CFRangeMake(0, 0), cfstr);
+    CFRange full = CFRangeMake(0, CFStringGetLength(cfstr));
+    CFAttributedStringSetAttribute(attr, full, kCTFontAttributeName,
+                                   font->ct_font);
+    CFAttributedStringSetAttribute(attr, full,
+                                   kCTForegroundColorFromContextAttributeName,
+                                   kCFBooleanTrue);
+
+    CTLineRef line = CTLineCreateWithAttributedString(attr);
+    float width = 0.0f;
+    if (line) {
+        width = (float)CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+        CFRelease(line);
+    }
+    CFRelease(attr);
+    CFRelease(cfstr);
+    return width;
+}
+
 void text_set_string(struct text *text, const char *str) {
-    if (!text) return;
-    if (text->string && str && strcmp(text->string, str) == 0) return;
+    if (!text) return;    if (text->string && str && strcmp(text->string, str) == 0) return;
     free(text->string);
     text->string = str ? strdup(str) : NULL;
     text_recreate_line(text);
@@ -130,7 +161,10 @@ void text_draw(struct text *text, CGContextRef ctx, CGRect frame) {
     }
 
     CGFloat x = frame.origin.x + text->x_offset;
-    CGFloat y = frame.origin.y + text->y_offset + text->line.descent;
+    /* bar_draw() works top-down, so frame.origin.y is the top of the line box
+       and the baseline sits one ascent below it. Anchoring on descent (as a
+       y-up layout would) floats the text above the box it was measured for. */
+    CGFloat y = frame.origin.y + text->y_offset + text->line.ascent;
 
     /* while highlighted the glyph is drawn in highlight_color, so a selected
        chip on a light fill can carry dark text */
@@ -138,10 +172,20 @@ void text_draw(struct text *text, CGContextRef ctx, CGRect frame) {
     if (text->highlighted && color_is_valid(text->highlight_color))
         fg = &text->highlight_color;
 
+    /* CoreText lays glyphs out along a y-up baseline, but bar_draw() flips
+       the context once so that every other draw call can work top-down.
+       Drawing straight into that flipped context renders every glyph
+       mirrored top-to-bottom, so undo the flip here, anchored at the
+       baseline. Inside this local space +x is right and +y is *down* on
+       screen, which is the opposite of CoreText's own sense. */
+    CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx, x, y);
+    CGContextScaleCTM(ctx, 1.0, -1.0);
+
     if (text->has_shadow) {
         CGContextSetRGBFillColor(ctx, 0.0f, 0.0f, 0.0f,
                                  0.5f * fg->a);
-        CGContextSetTextPosition(ctx, x + 1.0f, y - 1.0f);
+        CGContextSetTextPosition(ctx, 1.0f, 1.0f);
         CTLineDraw(text->line.line, ctx);
     }
 
@@ -150,8 +194,9 @@ void text_draw(struct text *text, CGContextRef ctx, CGRect frame) {
                              fg->g,
                              fg->b,
                              fg->a);
-    CGContextSetTextPosition(ctx, x, y);
+    CGContextSetTextPosition(ctx, 0.0f, 0.0f);
     CTLineDraw(text->line.line, ctx);
 
+    CGContextRestoreGState(ctx);
     CGContextRestoreGState(ctx);
 }

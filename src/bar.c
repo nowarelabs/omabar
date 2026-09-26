@@ -101,7 +101,9 @@ struct bar *bar_create(unsigned int did) {
 
     bar->did = did;
     bar->adid = display_arrangement_id(did);
-    bar->dsid = display_space_id(did);
+    /* dsid is the *display* a space belongs to, not a space id; the value
+       captured here is only a seed and is re-read once SkyLight is usable. */
+    bar->dsid = did;
     bar->shown = 1;
     bar->hidden = 0;
     bar->mouse_over = 0;
@@ -286,10 +288,22 @@ void bar_calculate_bounds(struct bar *bar) {
     center_r_first = (bar_w + (int)notch_width) / 2;
     center_l_first = (bar_w - (int)notch_width) / 2;
 
-    for (int i = 0; i < bm->bar_item_count; i++) {
+    /* Placement happens in two passes. Left/centre cursors grow to the right
+       and are filled in item order, but the right-anchored cursors shrink as
+       each item is placed, so the first item placed lands furthest right.
+       Walking those slots backwards is therefore what makes a right-hand
+       group read in ascending `order` from left to right - battery, volume,
+       clock - instead of mirrored. */
+    for (int pass = 0; pass < 2; pass++) {
+      for (int n = 0; n < bm->bar_item_count; n++) {
+        int i = (pass == 0) ? n : (bm->bar_item_count - 1 - n);
         struct bar_item *item = bm->bar_items[i];
         if (!item || !bar_draws_item(bar, item)) continue;
         if (item->position == POSITION_POPUP) continue;
+
+        int rtl_slot = (item->position == POSITION_RIGHT
+                     || item->position == POSITION_CENTER_LEFT);
+        if (rtl_slot != pass) continue;   /* the other pass owns this slot */
 
         bar_item_calculate_bounds(item);
         int len = (int)bar_item_get_length(item);
@@ -314,6 +328,7 @@ void bar_calculate_bounds(struct bar *bar) {
             *cursor += len + item->background.padding_right;
         }
         (void)bar_h;
+      }
     }
 
     bar->x_offset = bar->window->origin.x;

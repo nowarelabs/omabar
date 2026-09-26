@@ -1,6 +1,7 @@
 #include "mouse.h"
 #include "misc/helpers.h"
-#include <Carbon/Carbon.h>
+#include <ApplicationServices/ApplicationServices.h>
+#include <syslog.h>
 
 /* types reported to the handler (kept as small ints to stay self-contained) */
 enum {
@@ -13,79 +14,124 @@ enum {
 
 static mouse_handler_fn g_handler = NULL;
 static uint32_t g_window = 0;
-static EventHandlerRef g_event_handler_ref = NULL;
+static CFMachPortRef g_tap = NULL;
+static CFRunLoopSourceRef g_tap_source = NULL;
 
-static OSStatus mouse_callback(EventHandlerCallRef call_ref, EventRef event, void *data) {
-    (void)call_ref; (void)data;
-    if (!g_handler) return noErr;
+/* The previous implementation installed a Carbon handler on
+   GetEventDispatcherTarget(), which only receives events while an
+   NSApplication pumps its event loop. omabar has no NSApplication — it
+   runs CFRunLoopRun() — so that target never fired and nothing was ever
+   clickable. A CGEventTap bound to the main run loop is the equivalent
+   for this kind of app. */
+static CGEventRef mouse_tap_callback(CGEventTapProxy proxy, CGEventType type,
+                                     CGEventRef event, void *data) {
+    (void)proxy;
+    (void)data;
 
-    UInt32 event_kind = GetEventKind(event);
-    EventParamType type;
-    SInt32 value;
+    if (type == kCGEventTapDisabledByTimeout
+        || type == kCGEventTapDisabledByUserInput) {
+        if (g_tap) CGEventTapEnable(g_tap, true);
+        return event;
+    }
+
+    if (!g_handler || !event) return event;
 
     struct mouse_event me;
     memset(&me, 0, sizeof(me));
+    /* Quartz global space: origin top-left of the primary display, matching
+       the window origins the hit tests compare against. */
+    me.location = CGEventGetLocation(event);
+    me.modifier = (uint32_t)CGEventGetFlags(event);
+    me.button = (uint32_t)CGEventGetIntegerValueField(event,
+                                                      kCGMouseEventButtonNumber);
 
-    CGEventRef cg_event = CopyEventCGEvent(event);
-    if (cg_event) {
-        me.location = CGEventGetLocation(cg_event);
-        me.modifier = (uint32_t)CGEventGetFlags(cg_event);
-        me.button = (uint32_t)CGEventGetIntegerValueField(cg_event,
-                                                          kCGMouseEventButtonNumber);
-        CFRelease(cg_event);
-    } else {
-        Point qd = { 0, 0 };
-        if (GetEventParameter(event, kEventParamMouseLocation, typeQDPoint,
-                              NULL, sizeof(Point), NULL, &qd) == noErr) {
-            me.location = CGPointMake(qd.h, qd.v);
-        }
-    }
-
-    switch (event_kind) {
-        case kEventMouseDown:
+    switch (type) {
+        case kCGEventLeftMouseDown:
+        case kCGEventRightMouseDown:
+        case kCGEventOtherMouseDown:
             me.type = MOUSE_EVENT_DOWN;
             break;
-        case kEventMouseUp:
+        case kCGEventLeftMouseUp:
+        case kCGEventRightMouseUp:
+        case kCGEventOtherMouseUp:
             me.type = MOUSE_EVENT_UP;
             break;
-        case kEventMouseMoved:
+        case kCGEventMouseMoved:
             me.type = MOUSE_EVENT_MOVED;
             break;
-        case kEventMouseDragged:
+        case kCGEventLeftMouseDragged:
+        case kCGEventRightMouseDragged:
+        case kCGEventOtherMouseDragged:
             me.type = MOUSE_EVENT_DRAGGED;
             break;
-        case kEventMouseWheelMoved:
+        case kCGEventScrollWheel:
             me.type = MOUSE_EVENT_SCROLLED;
-            GetEventParameter(event, kEventParamMouseWheelDelta, typeSInt32,
-                              &type, sizeof(value), NULL, &value);
-            me.scroll_delta = (int)value;
+            me.scroll_delta = (int)CGEventGetIntegerValueField(
+                event, kCGScrollWheelEventDeltaAxis1);
             break;
+        default:
+            return event;
     }
 
     g_handler(&me);
-    return noErr;
+    return event;
 }
 
 void mouse_begin(mouse_handler_fn handler) {
     if (!handler) return;
     g_handler = handler;
+    if (g_tap) return;
 
-    EventTypeSpec events[] = {
-        { kEventClassMouse, kEventMouseDown },
-        { kEventClassMouse, kEventMouseUp },
-        { kEventClassMouse, kEventMouseMoved },
-        { kEventClassMouse, kEventMouseDragged },
-        { kEventClassMouse, kEventMouseWheelMoved }
-    };
-    int count = sizeof(events) / sizeof(events[0]);
-    InstallEventHandler(GetEventDispatcherTarget(), mouse_callback,
-                        count, events, NULL, &g_event_handler_ref);
+    CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown)
+                     | CGEventMaskBit(kCGEventRightMouseDown)
+                     | CGEventMaskBit(kCGEventOtherMouseDown)
+                     | CGEventMaskBit(kCGEventLeftMouseUp)
+                     | CGEventMaskBit(kCGEventRightMouseUp)
+                     | CGEventMaskBit(kCGEventOtherMouseUp)
+                     | CGEventMaskBit(kCGEventMouseMoved)
+                     | CGEventMaskBit(kCGEventLeftMouseDragged)
+                     | CGEventMaskBit(kCGEventRightMouseDragged)
+                     | CGEventMaskBit(kCGEventOtherMouseDragged)
+                     | CGEventMaskBit(kCGEventScrollWheel);
+
+    g_tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+                             kCGEventTapOptionDefault, mask,
+                             mouse_tap_callback, NULL);
+    if (!g_tap) {
+        /* Almost always a missing Accessibility/Input Monitoring grant:
+           CGEventTapCreate returns NULL without it. Say so, because the
+           symptom is otherwise just "the bar is not clickable". */
+        const char *msg = "omabar: CGEventTapCreate failed - grant the "
+                          "omabar binary Accessibility (or Input "
+                          "Monitoring) permission in System Settings > "
+                          "Privacy & Security, or bar items stay "
+                          "unclickable";
+        fprintf(stderr, "%s\n", msg);
+        syslog(LOG_ERR, "%s", msg);
+        return;
+    }
+
+    g_tap_source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, g_tap, 0);
+    if (!g_tap_source) {
+        CFRelease(g_tap);
+        g_tap = NULL;
+        return;
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), g_tap_source, kCFRunLoopCommonModes);
+    CGEventTapEnable(g_tap, true);
 }
 
 void mouse_end(void) {
-    if (g_event_handler_ref) {
-        RemoveEventHandler(g_event_handler_ref);
-        g_event_handler_ref = NULL;
+    if (g_tap_source) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), g_tap_source,
+                              kCFRunLoopCommonModes);
+        CFRelease(g_tap_source);
+        g_tap_source = NULL;
+    }
+    if (g_tap) {
+        CGEventTapEnable(g_tap, false);
+        CFRelease(g_tap);
+        g_tap = NULL;
     }
     g_handler = NULL;
 }

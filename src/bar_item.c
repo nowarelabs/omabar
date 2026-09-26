@@ -12,6 +12,7 @@
 #include "media.h"
 #include "display.h"
 #include "app_windows.h"
+#include <syslog.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -694,9 +695,11 @@ void bar_item_on_click(struct bar_item *item, uint32_t button,
         return;
     }
 
-    /* a host item with a popup toggles it on click */
+    /* a host item with a popup toggles it on click. Buttons are numbered the
+       way CGEvent numbers them (0 left, 1 right, 2 middle), so a left click is
+       0 here — testing for 1 made popups open on right-click only. */
     if (item->popup && popup_has_items(item->popup)
-        && item->popup->drawing && button == 1) {
+        && item->popup->drawing && button == 0) {
         popup_toggle(item->popup);
         bar_item_refresh(item);
     }
@@ -1338,9 +1341,26 @@ static const char *bar_item_space_icon(struct bar_item *item, int index) {
     return item->icon_strip[slot];
 }
 
-/* Width of a single chip: the measured glyph plus the item's inner padding. */
+/* Width of a single chip: the measured glyph plus the item's inner padding.
+   Every chip in the row shares one width, so it is measured from the widest
+   label the row can show rather than from item->icon, which the draw loop
+   re-points at each chip in turn. Reading item->icon.line.width here would
+   make the strip's geometry depend on whichever label was drawn last. */
 static float bar_item_space_chip_width(struct bar_item *item) {
-    return (float)item->icon.line.width
+    float widest = 0.0f;
+    int count = item->space_count > 0 ? item->space_count : 1;
+    char numbuf[16];
+
+    for (int i = 0; i < count; i++) {
+        if (bar_item_space_icon(item, i)) continue;  /* strip glyph: not text */
+        snprintf(numbuf, sizeof(numbuf), "%d", i + 1);
+        float w = text_measure(item->icon.font, numbuf);
+        if (w > widest) widest = w;
+    }
+
+    if (widest <= 0.0f) widest = (float)item->icon.line.width;
+
+    return widest
            + (float)item->padding_left
            + (float)item->padding_right;
 }
@@ -1421,17 +1441,56 @@ int bar_item_space_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx
 
 #include <dlfcn.h>
 
+/* Space ids are switched through SkyLight. The framework is dlopen'd
+   RTLD_LOCAL (see private_shim.c), so dlsym(RTLD_DEFAULT, ...) can never see
+   its symbols - the lookup has to go through the same handle the shim uses.
+
+   Two incompatible spellings exist. Up to macOS 14 the call was
+   SLSSwitchToSpace(connection, space_id). macOS 15 dropped it in favour of
+   SLSManagedDisplaySetCurrentSpace, which additionally takes the target
+   display's "Display Identifier" UUID string; passing a space id there
+   dereferences it as an object and takes the process down. The UUID-first
+   shape is confirmed by the framework's own bridged operation, whose
+   -initWithDisplayIdentifier:spaceID: takes an object then a uint64. */
 static CGError bar_item_space_switch(uint64_t sid) {
-    typedef CGError (*switch_fn)(uint32_t, uint64_t);
-    static switch_fn sfn = NULL;
+    typedef CGError (*legacy_fn)(uint32_t, uint64_t);
+    typedef CGError (*uuid_fn)(uint32_t, CFStringRef, uint64_t);
+    static legacy_fn legacy = NULL;
+    static uuid_fn by_uuid = NULL;
     static int looked_up = 0;
+    static int warned = 0;
+
     if (!looked_up) {
         looked_up = 1;
-        sfn = (switch_fn)dlsym(RTLD_DEFAULT, "SLSSwitchToSpace");
-        if (!sfn) sfn = (switch_fn)dlsym(RTLD_DEFAULT, "CGSSwitchToSpace");
+        legacy = (legacy_fn)private_symbol("SLSSwitchToSpace");
+        if (!legacy) legacy = (legacy_fn)private_symbol("CGSSwitchToSpace");
+        by_uuid = (uuid_fn)private_symbol("SLSManagedDisplaySetCurrentSpace");
     }
-    if (!sfn) return -1;
-    return sfn(g_connection, sid);
+
+    if (legacy) return legacy(g_connection, sid);
+
+    if (by_uuid) {
+        CFStringRef uuid = display_space_display_identifier(sid);
+        if (!uuid) {
+            const char *msg = "omabar: no managed display reports the target "
+                              "space; cannot switch space";
+            fprintf(stderr, "%s\n", msg);
+            syslog(LOG_ERR, "%s", msg);
+            return -1;
+        }
+        CGError err = by_uuid(g_connection, uuid, sid);
+        CFRelease(uuid);
+        return err;
+    }
+
+    if (!warned) {
+        warned = 1;
+        const char *msg = "omabar: no space-switch symbol found in SkyLight; "
+                          "space chips will not change spaces on this macOS";
+        fprintf(stderr, "%s\n", msg);
+        syslog(LOG_ERR, "%s", msg);
+    }
+    return -1;
 }
 
 void bar_item_space_clicked(struct bar_item *item, CGPoint point) {

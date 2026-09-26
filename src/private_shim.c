@@ -53,6 +53,13 @@ CGDirectDisplayID SLSGetDisplayIDForSpace(int cid, uint64_t sid) {
     return ((CGDirectDisplayID (*)(int, uint64_t))sym)(cid, sid);
 }
 
+/* Public accessor for callers that need a private symbol this shim does not
+   wrap. The framework is RTLD_LOCAL, so a dlsym(RTLD_DEFAULT, ...) lookup from
+   another translation unit can never find these. */
+void *private_symbol(const char *name) {
+    return resolve_symbol_quiet(name);
+}
+
 CGError (*SBSLSTransactionAddPostDecodeAction)(CFTypeRef transaction,
                                                void (^block)());
 

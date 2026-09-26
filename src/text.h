@@ -42,5 +42,6 @@ void text_set_highlighted(struct text *text, int on);
 void text_set_background(struct text *text, int enabled, struct color color);
 void text_set_shadow(struct text *text, int enabled);
 void text_draw(struct text *text, CGContextRef ctx, CGRect frame);
+float text_measure(struct font *font, const char *str);
 
 #endif

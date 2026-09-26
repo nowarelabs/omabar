@@ -191,6 +191,24 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
         g_tick_dnd_counter = 0;
         dnd_update();
         plugin_health_check();
+
+        /* The space strip highlights the active space, but the bar cannot
+           rely on EVENT_SPACE_CHANGED alone: switching through
+           SLSManagedDisplaySetCurrentSpace (what a chip click does) and some
+           keyboard shortcuts do not raise it, which left the highlight
+           pointing at the space the user just left. Re-read once a second
+           and re-sync only when it actually moved. */
+        for (int b = 0; b < bm->bar_count; b++) {
+            struct bar *bar = bm->bars[b];
+            if (!bar || !bar->window || bar->adid < 1) continue;
+            uint64_t sid = display_space_id(bar->did);
+            if (sid && sid != bar->sid) {
+                bar->sid = sid;
+                bar->dsid = display_space_display_id(sid);
+                bar_sync_space_items(bar);
+                bar_manager_set_needs_update(bm);
+            }
+        }
     }
 
     int item_updated = 0;
@@ -209,6 +227,9 @@ static void bar_manager_handle_scroll_tick(const struct event *event) {
     if (animating || item_updated)
         bar_manager_refresh(bm);
 }
+
+static CGPoint bar_manager_local_point(struct bar *bar, struct bar_item *item,
+                                       CGPoint point);
 
 static struct bar *bar_manager_bar_at(struct bar_manager *bm, CGPoint point) {
     for (int i = 0; i < bm->bar_count; i++) {
@@ -302,7 +323,8 @@ static void bar_manager_handle_mouse_clicked(const struct event *event) {
         return;
     }
 
-    bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, *point);
+    CGPoint local = bar_manager_local_point(bar, item, *point);
+    bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, local);
     bar_manager_set_needs_update(bm);
 }
 
@@ -349,7 +371,8 @@ static void bar_manager_handle_mouse_down(const struct event *event) {
         }
     }
 
-    bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, *point);
+    CGPoint local = bar_manager_local_point(bar, item, *point);
+    bar_item_on_click(item, (uint32_t)event->arg1, (uint32_t)event->arg2, local);
     bar_manager_set_needs_update(bm);
 }
 
