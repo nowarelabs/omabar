@@ -9,15 +9,16 @@ let
 
   configGenerator = import ./config-generator.nix { inherit lib pkgs; };
 
-  # Prefer the signed .app bundle's binary: TCC records an Accessibility grant
-  # against the code signing identity, and only the bundle carries a fixed
-  # `identifier` requirement. A cdhash-keyed identity (the bare ad-hoc binary)
-  # is revoked by every rebuild. Tolerate a package with no bundle so an
-  # overridden `package` keeps working.
-  omabarBin =
-    if builtins.pathExists "${pkgs.omabar}/Applications/Omabar.app/Contents/MacOS/Omabar"
-    then "${pkgs.omabar}/Applications/Omabar.app/Contents/MacOS/Omabar"
-    else "${pkgs.omabar}/bin/omabar";
+  # A copy of the signed bundle at a stable, user-visible path, used as the
+  # target of the Accessibility grant. It has to be a real copy rather than a
+  # symlink into /nix/store: System Settings' file picker cannot navigate into
+  # /nix/store, and the "+" button that adds an app to the Accessibility list
+  # will not accept a store path. ~/Applications is the conventional place for
+  # a per-user app that needs a permission grant, and because the copy is signed
+  # with a build-independent identifier the grant survives rebuilds.
+  omabarAppDir = "${config.home.homeDirectory}/Applications";
+  omabarApp = "${omabarAppDir}/Omabar.app";
+  omabarBin = "${omabarApp}/Contents/MacOS/Omabar";
 
   colorType = types.str; # "0xAARRGGBB" | "#RRGGBB[AA]" | bare hex
 
@@ -854,6 +855,50 @@ in
     # hotload is enabled the daemon's in-process FSEvents watcher and the
     # launchd WatchPaths both monitor this stable path.
     environment.etc."omabar_config".source = cfg.configFile;
+
+    # Install the signed bundle at a stable path the user can actually grant
+    # Accessibility to, and run the daemon from that copy.
+    #
+    # The Accessibility grant is the one thing about this bar that macOS will
+    # not let us configure: it has to be toggled by hand in System Settings.
+    # That is only workable if the thing being granted has a path that (a) the
+    # System Settings file picker can reach and (b) does not change when
+    # omabar is rebuilt. /nix/store fails (a) on both counts -- the picker hides
+    # it and the "+" button rejects store paths -- and the store path changes
+    # on every rebuild, failing (b) as well. Copying the signed bundle to
+    # ~/Applications fixes both. The copy keeps its build-independent signing
+    # identity, so the grant made against it keeps working across rebuilds.
+    system.activationScripts.omabarApp = lib.mkIf (cfg.enable && config.system.primaryUser != null) {
+      text = ''
+        target="${omabarApp}"
+        source="${pkgs.omabar}/Applications/Omabar.app"
+
+        if [ -d "$source" ]; then
+          mkdir -p "$(dirname "$target")"
+          # Replace atomically-ish: build the new copy alongside, then swap, so
+          # a running daemon is never left with a half-written bundle.
+          rm -rf "$target.new"
+          mkdir -p "$target.new"
+          cp -R "$source/." "$target.new/"
+          rm -rf "$target"
+          mv "$target.new" "$target"
+
+          if [ ! -x "$target/Contents/MacOS/Omabar" ]; then
+            echo "omabar: installed bundle is missing its executable" >&2
+            exit 1
+          fi
+        else
+          # A caller overrode `package` with a derivation that ships no bundle.
+          # Fall back to the bare binary so the bar still runs; it just will
+          # not be clickable, because a cdhash identity cannot keep a grant.
+          mkdir -p "$(dirname "$target")/Omabar.app/Contents/MacOS"
+          cp -R "${pkgs.omabar}/bin/omabar" \
+            "$target/Contents/MacOS/Omabar" 2>/dev/null || true
+          echo "omabar: WARNING - ${pkgs.omabar} ships no signed bundle;" >&2
+          echo "omabar: WARNING - clicks will break on every rebuild." >&2
+        fi
+      '';
+    };
 
     # The bar is a menu-bar app: it needs the user's GUI session (WindowServer,
     # CoreVideo, CFPreferences) and it refuses to run as root. nix-darwin's
