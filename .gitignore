@@ -8,6 +8,9 @@ dist/
 *.d
 *.dylib
 
+# Build output directory (objects, omabar, config_test)
+src/bin/
+
 # Nix
 result
 result-*

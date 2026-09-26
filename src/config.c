@@ -499,6 +499,9 @@ static void parse_item_object(const json_val_t *item_obj,
     json_val_t *bg = json_get_field(item_obj, "background");
     apply_background_json(&item->background, bg);
 
+    json_val_t *sel_bg = json_get_field(item_obj, "selected_background");
+    apply_background_json(&item->selected_background, sel_bg);
+
     /* Icon overrides */
     json_val_t *icon_obj = json_get_field(item_obj, "icon");
     if (icon_obj && icon_obj->type == JSON_OBJECT) {

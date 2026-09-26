@@ -251,6 +251,13 @@ void bar_draw(struct bar *bar) {
     if (!bar || !bar->window || !bar->window->context) return;
     if (bar->adid < 1 || bar->hidden) return;
 
+    /* window_set_frame only records the pending geometry; commit it to the
+       window server here so the shape/position actually take effect. */
+    window_apply_frame(bar->window, false);
+
+    /* bar.alpha is the user-facing opacity knob; keep the window in sync. */
+    window_set_alpha(bar->window, g_bar_manager.alpha);
+
     CGContextRef ctx = bar->window->context;
     CGRect frame = bar->window->frame;
 

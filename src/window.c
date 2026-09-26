@@ -145,6 +145,13 @@ struct window *window_open(struct bar *bar, int width, int height) {
         CFRelease(window_list);
     }
 
+    /* The window is created fully transparent so it does not flash an
+       empty frame before the first draw. Order it above the desktop and
+       restore full opacity, otherwise it never appears on screen. */
+    window_order(window, W_ABOVE, 0);
+    SLSSetWindowOpacity(g_connection, window->id, 1);
+    windows_unfreeze();
+
     return window;
 }
 
@@ -346,6 +353,12 @@ void window_assign_mouse_tracking_area(struct window *window, CGRect rect) {
 void window_set_blur_radius(struct window *window, uint32_t blur_radius) {
     SLSSetWindowBackgroundBlurRadius(g_connection, window->id, blur_radius);
     if (window->context) window_clear_background(window);
+}
+
+void window_set_alpha(struct window *window, double alpha) {
+    if (!window) return;
+    SLSSetWindowAlpha(g_connection, window->id,
+                      (float)(alpha < 0.0 ? 0.0 : (alpha > 1.0 ? 1.0 : alpha)));
 }
 
 void window_disable_shadow(struct window *window) {

@@ -554,6 +554,12 @@ void bar_manager_begin(struct bar_manager *bm) {
     }
 
     bm->bar_needs_update = 1;
+
+    /* Paint the first frame here: the scroll-tick handler only redraws when
+       an item has a nonzero update_interval, so a bar built entirely from
+       event-driven items would otherwise never be drawn at all. */
+    bar_manager_refresh(bm);
+    windows_unfreeze();
 }
 
 void bar_manager_destroy(struct bar_manager *bm) {

@@ -31,6 +31,7 @@ void bar_item_init(struct bar_item *item) {
     text_init(&item->icon);
     text_init(&item->label);
     background_init(&item->background);
+    background_init(&item->selected_background);
     item->popup = calloc(1, sizeof(*item->popup));
     if (item->popup) popup_init(item->popup, item);
 }
@@ -41,6 +42,7 @@ void bar_item_destroy(struct bar_item *item) {
     text_destroy(&item->icon);
     text_destroy(&item->label);
     background_destroy(&item->background);
+    background_destroy(&item->selected_background);
     if (item->graph) graph_destroy(item->graph);
     if (item->alias) alias_destroy(item->alias);
     if (item->slider) slider_destroy(item->slider);
@@ -110,6 +112,7 @@ struct bar_item *bar_item_clone(const struct bar_item *src) {
     text_clone(&dst->icon, &src->icon);
     text_clone(&dst->label, &src->label);
     background_clone(&dst->background, &src->background);
+    background_clone(&dst->selected_background, &src->selected_background);
 
     if (src->graph) {
         dst->graph = graph_create(src->graph->width, src->graph->height);
@@ -1006,16 +1009,17 @@ int bar_item_space_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx
     if (!item || !ctx || item->hidden) return 0;
     if (item->type != BAR_COMPONENT_SPACE) return 0;
 
-    /* selected highlight */
+    /* selected highlight: prefer the configured selected_background, and
+       fall back to a translucent white chip when none is set */
     if (item->selected) {
-        struct background *bg = &item->background;
-        if (bg->color.a <= 0.0f) {
-            struct color sel = { 1.0f, 1.0f, 1.0f, 0.35f, 1 };
-            struct background tmp = *bg;
-            tmp.color = sel;
-            background_draw(&tmp, ctx, frame);
+        struct background *sel = &item->selected_background;
+        if (sel->color.a > 0.0f || sel->type > 0 || sel->has_shadow) {
+            background_draw(sel, ctx, frame);
         } else {
-            background_draw(bg, ctx, frame);
+            struct color fallback = { 1.0f, 1.0f, 1.0f, 0.35f, 1 };
+            struct background tmp = *sel;
+            tmp.color = fallback;
+            background_draw(&tmp, ctx, frame);
         }
     } else if (item->background.type > 0 || item->background.color.a > 0
                || item->background.has_shadow) {

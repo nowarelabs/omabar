@@ -58,6 +58,8 @@ endif
 # the compile steps and the final link.
 SANITIZE :=
 
+all: $(ODIR)/omabar $(ODIR)/config_test
+
 $(ODIR)/config_test: $(patsubst %.o, $(ODIR)/%.o, $(_TEST_OBJ))
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
@@ -72,8 +74,6 @@ $(ODIR)/%.o: $(SRC)/%.m $(wildcard $(SRC)/*.h $(SRC)/misc/*.h) | $(ODIR)
 
 $(ODIR):
 	mkdir -p $(ODIR)
-
-all: $(ODIR)/omabar $(ODIR)/config_test
 
 debug: all
 
@@ -104,4 +104,29 @@ universal: clean
 clean:
 	rm -rf $(ODIR)
 
-.PHONY: all debug release asan leak perf universal clean
+# Everything the build leaves behind: object files and both binaries.
+# $(ODIR) is the only build output directory.
+distclean: clean
+
+# Full removal. Deletes build output plus every runtime artifact the
+# daemon creates, so a user uninstalling leaves no trace. Nix-installed
+# paths (/etc/omabar_config, the launchd agent, the store path and
+# /Library/Fonts/Nix Fonts) are not ours to remove here; drop the flake
+# from your system config and rebuild to reclaim those.
+RUNTIME_ARTIFACTS = /tmp/omabar_$${USER:-user}.lock \
+                    /tmp/omabar_$${USER:-user}.socket
+
+uninstall:
+	@if pgrep -x omabar >/dev/null 2>&1; then \
+	    echo "omabar is still running; stop it first (e.g. pkill -TERM omabar)"; \
+	    exit 1; \
+	fi
+	@$(MAKE) clean
+	@for f in $(RUNTIME_ARTIFACTS); do \
+	    if [ -e "$$f" ] || [ -S "$$f" ]; then \
+	        rm -f "$$f" && echo "removed $$f"; \
+	    fi; \
+	done
+	@echo "omabar build output and runtime artifacts removed."
+
+.PHONY: all debug release asan leak perf universal clean distclean uninstall

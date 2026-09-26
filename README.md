@@ -61,6 +61,46 @@ In your flake:
 `darwin-rebuild switch` builds the daemon (`pkgs.omabar`), installs the
 launchd agent (RunAtLoad), and writes `/etc/omabar_config`.
 
+## Uninstalling
+
+omabar keeps no persistent state: everything it writes lives in `/tmp`
+and is either unlinked on exit or removable with one command.
+
+**Nix install (the normal path).** Remove the module from your system
+configuration and rebuild. That reclaims the store path, the launchd
+agent (`~/Library/LaunchAgents/omabar.plist`), the `/etc/omabar_config`
+symlink, and any fonts added through `fonts.packages`:
+
+```nix
+services.omabar.enable = false; # or drop darwinModules.omabar
+```
+
+then `darwin-rebuild switch`.
+
+**Local build.** `make uninstall` in `src/` deletes the build output and
+every runtime artifact, and refuses to run while the daemon is up so it
+cannot pull the binary out from under a live process:
+
+```sh
+cd src
+make uninstall
+```
+
+That covers:
+
+| Path | Created by | Removed by |
+| --- | --- | --- |
+| `src/bin/` (objects, `omabar`, `config_test`) | `make` | `make clean` / `uninstall` |
+| `/tmp/omabar_$USER.lock` | daemon startup | unlinked on clean exit, else `uninstall` |
+| `/tmp/omabar_$USER.socket` | IPC server | `socket_daemon_end()` on exit, else `uninstall` |
+
+`/tmp/omabar_config` is only *watched* for hot-reload, never created, so
+there is nothing to clean up. The lock file is held with `fcntl`, so a
+crashed or `SIGKILL`ed instance leaves a zero-byte file behind that no
+longer blocks a restart — `make uninstall` removes it regardless.
+
+Build output is git-ignored (`src/bin/`); only source is tracked.
+
 ## Configuration reference
 
 Everything lives under `services.omabar`. All options have a default derived

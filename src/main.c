@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 
 struct bar_manager g_bar_manager;
 struct env_vars g_env_vars;
@@ -28,7 +29,14 @@ static void daemonize(void) {
     if (pid < 0) exit(EXIT_FAILURE);
     if (pid > 0) _exit(0);
 
-    setsid();
+    /* NOTE: deliberately no setsid() here. Leaving the user's GUI session
+       makes the process invisible to cfprefsd, and any CFPreferences-backed
+       API then segfaults -- CVDisplayLinkCreateWithActiveCGDisplays() in
+       animation_begin() is the first such call and killed every daemon on
+       startup. Staying in the session keeps those APIs working; ignoring
+       SIGHUP covers the terminal hangup that setsid() was there to prevent. */
+    signal(SIGHUP, SIG_IGN);
+
     chdir("/");
 
     int devnull = open("/dev/null", O_RDWR);
@@ -104,7 +112,16 @@ void omabar_begin(void) {
 void omabar_cleanup(void) {
     bar_manager_destroy(&g_bar_manager);
     env_vars_destroy(&g_env_vars);
-    if (g_lock_fd >= 0) close(g_lock_fd);
+    if (g_lock_fd >= 0) {
+        close(g_lock_fd);
+        g_lock_fd = -1;
+        /* Remove the lock file we created so a clean shutdown leaves
+           nothing behind. close() already drops the fcntl lock, so this is
+           purely cosmetic-but-complete: it is what lets `make uninstall`
+           find nothing left to remove. Only reached when we actually hold
+           the lock, so another running instance's file is never touched. */
+        if (g_lock_file[0] != '\0') unlink(g_lock_file);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -136,20 +153,29 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Fork into the background before touching any system framework.
+       omabar_init() below opens a CGS connection and pulls in CoreFoundation
+       and CoreVideo, none of which survive fork(): in the child,
+       CVDisplayLinkCreateWithActiveCGDisplays() reaches CFPreferences and
+       segfaults, killing every daemon immediately after launch. Forking
+       first means the child performs the whole bootstrap on its own. */
+    if (!g_foreground) {
+        daemonize();
+    }
+
     /* bootstrap initialization */
     omabar_init();
 
     /* load configuration if specified */
     if (g_config_path[0] != '\0') {
         if (config_load(g_config_path, g_custom_lock_file, sizeof(g_custom_lock_file)) < 0) {
+            /* stderr is /dev/null once daemonized, so failures would be
+               invisible without this. */
+            if (!g_foreground)
+                syslog(LOG_ERR, "omabar: failed to load config '%s'", g_config_path);
             omabar_cleanup();
             return 1;
         }
-    }
-
-    /* fork into background unless --foreground is requested */
-    if (!g_foreground) {
-        daemonize();
     }
 
     /* acquire lock file so only one daemon can run.
@@ -157,8 +183,13 @@ int main(int argc, char *argv[]) {
        locks are not inherited across fork(), so acquiring before
        daemonize() would release the lock when the parent exits. */
     if (acquire_lockfile() < 0) {
-        fprintf(stderr, "omabar: failed to acquire lock file '%s' (another instance running?)\n",
-                g_lock_file[0] ? g_lock_file : "default");
+        if (g_foreground) {
+            fprintf(stderr, "omabar: failed to acquire lock file '%s' (another instance running?)\n",
+                    g_lock_file[0] ? g_lock_file : "default");
+        } else {
+            syslog(LOG_ERR, "omabar: failed to acquire lock file '%s' (another instance running?)",
+                   g_lock_file[0] ? g_lock_file : "default");
+        }
         omabar_cleanup();
         return 1;
     }

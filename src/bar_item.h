@@ -61,6 +61,7 @@ struct bar_item {
     struct text icon;
     struct text label;
     struct background background;
+    struct background selected_background;
 
     struct graph *graph;
     struct alias *alias;

@@ -181,6 +181,107 @@ static int test_valid_config(void) {
     return tests_failed == 0;
 }
 
+/* Config exercising the remaining documented bar/item fields so the
+   generated Nix output is covered end to end. */
+static void make_full_config(const char *path) {
+    const char *json =
+        "{"
+        "\"bar\":{"
+            "\"position\":\"bottom\","
+            "\"height\":44,"
+            "\"width\":1200,"
+            "\"margin\":7,"
+            "\"blur_radius\":12,"
+            "\"color\":\"0x80112233\","
+            "\"shadow\":false,"
+            "\"shadow_color\":\"0x40000000\","
+            "\"sticky\":false,"
+            "\"topmost\":false,"
+            "\"y_offset\":-3,"
+            "\"alpha\":0.5"
+        "},"
+        "\"defaults\":{\"padding_left\":4,\"padding_right\":9},"
+        "\"items\":{"
+            "\"center_right\":["
+                "{"
+                    "\"name\":\"spaces\","
+                    "\"type\":\"space\","
+                    "\"position\":\"e\","
+                    "\"icon_strip\":[\"a\",\"b\"],"
+                    "\"background\":{\"color\":\"0x11223344\",\"corner_radius\":3},"
+                    "\"selected_background\":{\"color\":\"0x44ff0000\",\"corner_radius\":4},"
+                    "\"click_enabled\":false,"
+                    "\"associated_display\":1,"
+                    "\"associated_space\":2,"
+                    "\"update_interval\":5,"
+                    "\"update_mask\":[\"space_changed\",\"display_added\"]"
+                "}"
+            "]"
+        "}"
+        "}";
+
+    FILE *f = fopen(path, "wb");
+    if (!f) { perror("fopen"); exit(1); }
+    fwrite("OMABC", 1, 5, f);
+    fputc(0x01, f);
+    fwrite("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 1, 10, f);
+    fwrite(json, 1, strlen(json), f);
+    fclose(f);
+}
+
+static int test_full_config(void) {
+    printf("\n=== test_full_config ===\n");
+    const char *path = "/tmp/omabar_test_full";
+    make_full_config(path);
+
+    char lock_file[256] = {0};
+    int result = config_load(path, lock_file, sizeof(lock_file));
+    check("config_load returns 0", result == 0);
+
+    check_int("bar position = bottom (1)", g_bar_manager.position, 1);
+    check_int("bar height = 44", g_bar_manager.height, 44);
+    check_int("bar width = 1200", g_bar_manager.width, 1200);
+    check_int("bar margin = 7", g_bar_manager.margin, 7);
+    check_int("bar blur_radius = 12", g_bar_manager.blur_radius, 12);
+    check_int("bar shadow = 0", g_bar_manager.shadow, 0);
+    check_int("bar sticky = 0", g_bar_manager.sticky, 0);
+    check_int("bar topmost = 0", g_bar_manager.topmost, 0);
+    check_int("bar y_offset = -3", g_bar_manager.y_offset, -3);
+    check_int("bar alpha = 0.5", (int)(g_bar_manager.alpha * 10), 5);
+    check("bar color applied", g_bar_manager.default_item.background.color.a > 0.0f);
+
+    struct bar_item *item = NULL;
+    for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
+        struct bar_item *it = g_bar_manager.bar_items[i];
+        if (it && it->name && strcmp(it->name, "spaces") == 0) item = it;
+    }
+    check("spaces item present", item != NULL);
+    if (item) {
+        check_int("spaces type = SPACE", item->type, BAR_COMPONENT_SPACE);
+        check_int("spaces position = CENTER_RIGHT", item->position, POSITION_CENTER_RIGHT);
+        check_int("spaces icon_strip_count = 2", item->icon_strip_count, 2);
+        check_int("spaces background corner_radius = 3", item->background.corner_radius, 3);
+        check("spaces selected_background color applied",
+              item->selected_background.color.a > 0.0f
+              && item->selected_background.color.r > 0.9f);
+        check_int("spaces selected_background corner_radius = 4",
+                  item->selected_background.corner_radius, 4);
+        check_int("spaces click_enabled = 0", item->click_enabled, 0);
+        check_int("spaces associated_display = 1", (int)item->associated_display, 1);
+        check_int("spaces associated_space = 2", (int)item->associated_space, 2);
+        check_int("spaces update_interval = 5", item->update_interval, 5);
+        check("spaces update_mask has SPACE_CHANGED",
+              (item->update_mask & UPDATE_SPACE_CHANGED) != 0);
+        check("spaces update_mask has DISPLAY_ADDED",
+              (item->update_mask & UPDATE_DISPLAY_ADDED) != 0);
+        check_int("spaces padding_left from defaults", item->padding_left, 4);
+        check_int("spaces padding_right from defaults", item->padding_right, 9);
+    }
+
+    (void)remove(path);
+    return tests_failed == 0;
+}
+
 static int test_bad_magic(void) {
     printf("\n=== test_bad_magic ===\n");
     const char *path = "/tmp/omabar_test_bad_magic";
@@ -374,6 +475,10 @@ int main(int argc, char *argv[]) {
     bar_manager_init(&g_bar_manager);
 
     test_valid_config();
+    bar_manager_destroy(&g_bar_manager);
+    bar_manager_init(&g_bar_manager);
+
+    test_full_config();
     bar_manager_destroy(&g_bar_manager);
     bar_manager_init(&g_bar_manager);
 

@@ -48,6 +48,7 @@ bool window_apply_frame(struct window *window, bool forced);
 void window_send_to_space(struct window *window, uint64_t dsid);
 
 void window_set_blur_radius(struct window *window, uint32_t radius);
+void window_set_alpha(struct window *window, double alpha);
 void window_disable_shadow(struct window *window);
 void window_set_level(struct window *window, uint32_t level);
 void window_order(struct window *window, int order, int relative_to);

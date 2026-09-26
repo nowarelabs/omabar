@@ -96,17 +96,23 @@
 #define BAR_COMPONENT_SLIDER             "slider"
 
 /* ═══════════════════════════════════════════════════════════════
-   Bar position types (char codes, SketchyBar compatible)
+   Bar position char codes (SketchyBar compatible)
+
+   NOTE: these deliberately do NOT reuse the names in bar_item.h's
+   `enum bar_item_position`. Same-named macros silently shadow the enum
+   constants in every translation unit that includes this header, which
+   made config.c store ASCII codes ('l' = 108, 'e' = 101, ...) into
+   `struct bar_item.position` instead of the real enum values.
    ═══════════════════════════════════════════════════════════════ */
 
-#define POSITION_TOP                     't'
-#define POSITION_BOTTOM                  'b'
-#define POSITION_LEFT                    'l'
-#define POSITION_RIGHT                   'r'
-#define POSITION_CENTER                  'c'
-#define POSITION_POPUP                   'p'
-#define POSITION_CENTER_LEFT             'q'
-#define POSITION_CENTER_RIGHT            'e'
+#define SB_POS_TOP                      't'
+#define SB_POS_BOTTOM                   'b'
+#define SB_POS_LEFT                     'l'
+#define SB_POS_RIGHT                    'r'
+#define SB_POS_CENTER                   'c'
+#define SB_POS_POPUP                    'p'
+#define SB_POS_CENTER_LEFT              'q'
+#define SB_POS_CENTER_RIGHT             'e'
 
 /* string forms for Nix config / IPC */
 #define BAR_POSITION_TOP                 "top"
