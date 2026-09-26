@@ -845,34 +845,68 @@ in
     # launchd WatchPaths both monitor this stable path.
     environment.etc."omabar_config".source = cfg.configFile;
 
-    launchd.agents.omabar = {
-      command = "${pkgs.omabar}/bin/omabar";
-      path = [ pkgs.coreutils pkgs.findutils "${pkgs.omabar}/bin" ];
-      environment = {
-        OMABAR_CONFIG_FILE =
-          if cfg.daemon.hotload
-          then "/etc/omabar_config"
-          else toString cfg.configFile;
-        OMABAR_DEFAULT_FONT = cfg.fonts.default;
-      };
-      serviceConfig = {
-        RunAtLoad = true;
-        KeepAlive = false;
-        ProcessType = "Interactive";
-        ThrottleInterval = 1;
-        # The daemon forks and lets its parent _exit(0) (see daemonize() in
-        # src/main.c, which deliberately avoids setsid() so the child stays in
-        # the user's GUI session for CFPreferences). launchd treats that parent
-        # exit as the job finishing and, with the default
-        # AbandonProcessGroup = false, tears down the whole process group --
-        # killing the daemon on its first tick. The job then sits at
-        # "not running, last exit code 0" with no process and no error.
-        # Abandoning the group leaves the forked child alive as launchd
-        # intended; KeepAlive is already false, so nothing reaps it.
-        AbandonProcessGroup = true;
-      } // (lib.optionalAttrs cfg.daemon.hotload {
-        WatchPaths = [ "/etc/omabar_config" ];
-      });
+    # The bar is a menu-bar app: it needs the user's GUI session (WindowServer,
+    # CoreVideo, CFPreferences) and it refuses to run as root. nix-darwin's
+    # `launchd.agents` land in /Library/LaunchAgents, which the activation
+    # loads with `launchctl load` in the *system* domain, so an agent with no
+    # UserName is launched as root and dies immediately with
+    # "omabar: refusing to run as root" — which surfaces only as a launchd job
+    # stuck at "not running, last exit code 1" with nothing in the log.
+    #
+    # `environment.userLaunchAgents` is the mechanism meant for this: the plist
+    # is copied into the primary user's ~/Library/LaunchAgents and loaded with
+    # `launchctl asuser <uid> sudo --user=<user> launchctl load`, which puts it
+    # in that user's GUI session.
+    environment.userLaunchAgents = lib.mkIf (cfg.enable && config.system.primaryUser != null) {
+      omabar.source = pkgs.writeText "org.nixos.omabar.plist" ''
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>Label</key>
+          <string>org.nixos.omabar</string>
+          <key>ProgramArguments</key>
+          <array>
+            <string>/bin/sh</string>
+            <string>-c</string>
+            <string>/bin/wait4path /nix/store &amp;&amp; exec ${pkgs.omabar}/bin/omabar</string>
+          </array>
+          <key>EnvironmentVariables</key>
+          <dict>
+            <key>OMABAR_CONFIG_FILE</key>
+            <string>${if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile}</string>
+            <key>OMABAR_DEFAULT_FONT</key>
+            <string>${lib.escapeXML cfg.fonts.default}</string>
+            <key>PATH</key>
+            <string>${lib.makeBinPath [ pkgs.coreutils pkgs.findutils ]}:${pkgs.omabar}/bin</string>
+          </dict>
+          <key>RunAtLoad</key>
+          <true/>
+          <key>KeepAlive</key>
+          <false/>
+          <key>ProcessType</key>
+          <string>Interactive</string>
+          <key>ThrottleInterval</key>
+          <integer>1</integer>
+          <!-- The daemon forks and lets its parent _exit(0) (see daemonize()
+               in src/main.c, which deliberately avoids setsid() so the child
+               stays in the user's GUI session for CFPreferences). launchd treats
+               that parent exit as the job finishing and, with the default
+               AbandonProcessGroup = false, tears down the process group,
+               killing the daemon on its first tick. Abandoning the group
+               leaves the forked child alive; KeepAlive is false, so nothing
+               reaps it. -->
+          <key>AbandonProcessGroup</key>
+          <true/>
+        ${lib.optionalString cfg.daemon.hotload ''
+          <key>WatchPaths</key>
+          <array>
+            <string>/etc/omabar_config</string>
+          </array>''}
+        </dict>
+        </plist>
+      '';
+      omabar.target = "org.nixos.omabar.plist";
     };
   };
 }
