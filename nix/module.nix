@@ -17,9 +17,12 @@ let
   # a per-user app that needs a permission grant, and because the copy is signed
   # with a build-independent identifier the grant survives rebuilds.
   # This is a nix-darwin module, so there is no Home Manager `home` option in
-  # scope; resolve the primary user's home from nix-darwin's own user config.
+  # scope. nix-darwin's system.primaryUser is just the username string; the
+  # home directory lives in that user's record.
   primaryUser = config.system.primaryUser;
-  omabarAppDir = "${primaryUser.home}/Applications";
+  omabarAppDir =
+    if primaryUser == null then "/Applications"
+    else "${config.users.users.${primaryUser}.home}/Applications";
   omabarApp = "${omabarAppDir}/Omabar.app";
   omabarBin = "${omabarApp}/Contents/MacOS/Omabar";
 
