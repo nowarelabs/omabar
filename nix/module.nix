@@ -880,6 +880,7 @@ in
     (lib.optionalString (cfg.enable && primaryUser != null) ''
       target="${omabarApp}"
       source="${pkgs.omabar}/Applications/Omabar.app"
+      uid=$(/usr/bin/id -u ${primaryUser})
 
       if [ -d "$source" ]; then
         mkdir -p "$(dirname "$target")"
@@ -904,6 +905,26 @@ in
           "$target/Contents/MacOS/Omabar" 2>/dev/null || true
         echo "omabar: WARNING - ${pkgs.omabar} ships no signed bundle;" >&2
         echo "omabar: WARNING - clicks will break on every rebuild." >&2
+      fi
+
+      # Recover from an instance the launchd job does not track. A generation
+      # that predates --foreground forked, and that orphan keeps the daemon
+      # lockfile forever: the agent starts, fails to take the lock, exits 1,
+      # and because KeepAlive is false nothing retries. The symptom is nasty
+      # and silent — launchd reports the job as not running while the old bar
+      # is still on screen, still rendering the *old* config, so a geometry or
+      # feature change appears to do nothing.
+      #
+      # Detect exactly that case: launchd has no live pid for the job, yet an
+      # Omabar process exists. A tracked instance always has a pid, so this
+      # cannot disturb a healthy bar and will not restart it on every rebuild.
+      job_pid=$(/bin/launchctl print "gui/$uid/org.nixos.omabar" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\).*/\1/p' | head -1)
+      if [ -z "$job_pid" ] && /usr/bin/pgrep -x Omabar >/dev/null 2>&1; then
+        echo "omabar: untracked instance holds the lock; restarting the agent" >&2
+        /usr/bin/pkill -x Omabar 2>/dev/null || true
+        sleep 1
+        /bin/launchctl kickstart -k "gui/$uid/org.nixos.omabar" 2>/dev/null || true
       fi
     '') +
 
