@@ -874,8 +874,14 @@ in
     # on every rebuild, failing (b) as well. Copying the signed bundle to
     # ~/Applications fixes both. The copy keeps its build-independent signing
     # identity, so the grant made against it keeps working across rebuilds.
-    system.activationScripts.omabarApp = lib.mkIf (cfg.enable && primaryUser != null) {
-      text = ''
+    # NOTE: this must go in the existing `postActivation` script. nix-darwin
+    # only ever runs `preActivation` and `postActivation`; a custom key such as
+    # `system.activationScripts.omabarApp` is accepted by the module system,
+    # shows up under config.system.activationScripts, and is then silently never
+    # executed. That left ~/Applications/Omabar.app missing while the
+    # LaunchAgent pointed straight at it, so the bar could not start at all.
+    system.activationScripts.postActivation.text = lib.mkAfter (
+    when (cfg.enable && primaryUser != null) ''
         target="${omabarApp}"
         source="${pkgs.omabar}/Applications/Omabar.app"
 
@@ -903,8 +909,8 @@ in
           echo "omabar: WARNING - ${pkgs.omabar} ships no signed bundle;" >&2
           echo "omabar: WARNING - clicks will break on every rebuild." >&2
         fi
-      '';
-    };
+      ''
+    );
 
     # The bar is a menu-bar app: it needs the user's GUI session (WindowServer,
     # CoreVideo, CFPreferences) and it refuses to run as root. nix-darwin's
