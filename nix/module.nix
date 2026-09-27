@@ -530,6 +530,19 @@ in
         '';
       };
 
+      notch_auto_offset = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          When true (the default) and `notch_offset` is 0, a top bar on a
+          notched display is pushed below the camera housing so a floating
+          rounded container is never clipped. Set this to false to keep the bar
+          flush at `y_offset` so it spans the native menu bar band instead;
+          `notch_width` still keeps centre-positioned items clear of the
+          camera housing.
+        '';
+      };
+
       y_offset = mkOption {
         type = types.int;
         default = theme.bar.y_offset;
@@ -851,16 +864,88 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    services.omabar.configFile = configGenerator.generate { cfg = cfg; };
+  config = {
+  # Deliberately unconditional. `enable = false` used to mean only "nix-darwin
+  # stops managing omabar": the daemon forked, so it outlived the LaunchAgent
+  # being deleted, and the installed ~/Applications/Omabar.app was never
+  # removed either. This script has to run in both states, so it cannot live
+  # behind `mkIf cfg.enable`.
+  system.activationScripts.postActivation.text = lib.mkAfter (
+    # NOTE: this must be the existing `postActivation` script. nix-darwin only
+    # ever runs `preActivation` and `postActivation`; a custom key such as
+    # `system.activationScripts.omabarApp` is accepted by the module system,
+    # shows up under config.system.activationScripts, and is then silently
+    # never executed. That left ~/Applications/Omabar.app missing while the
+    # LaunchAgent pointed straight at it, so the bar could not start at all.
+    (lib.optionalString (cfg.enable && primaryUser != null) ''
+      target="${omabarApp}"
+      source="${pkgs.omabar}/Applications/Omabar.app"
 
-    fonts.packages = cfg.fonts.packages;
+      if [ -d "$source" ]; then
+        mkdir -p "$(dirname "$target")"
+        # Replace atomically-ish: build the new copy alongside, then swap, so
+        # a running daemon is never left with a half-written bundle.
+        rm -rf "$target.new"
+        mkdir -p "$target.new"
+        cp -R "$source/." "$target.new/"
+        rm -rf "$target"
+        mv "$target.new" "$target"
+
+        if [ ! -x "$target/Contents/MacOS/Omabar" ]; then
+          echo "omabar: installed bundle is missing its executable" >&2
+          exit 1
+        fi
+      else
+        # A caller overrode `package` with a derivation that ships no bundle.
+        # Fall back to the bare binary so the bar still runs; it just will not
+        # be clickable, because a cdhash identity cannot keep a grant.
+        mkdir -p "$(dirname "$target")/Omabar.app/Contents/MacOS"
+        cp -R "${pkgs.omabar}/bin/omabar" \
+          "$target/Contents/MacOS/Omabar" 2>/dev/null || true
+        echo "omabar: WARNING - ${pkgs.omabar} ships no signed bundle;" >&2
+        echo "omabar: WARNING - clicks will break on every rebuild." >&2
+      fi
+    '') +
+
+    # Disabling must actually remove omabar, not just stop managing it. By
+    # the time postActivation runs, nix-darwin has already dropped
+    # org.nixos.omabar from ~/Library/LaunchAgents, and the agent now runs in
+    # the foreground so launchd sends SIGTERM and omabar exits via its own
+    # handler. The pkill is a belt-and-braces sweep for orphans spawned by an
+    # older generation that still forked: those are invisible to launchd, so
+    # nothing else would ever reap them. Absolute paths because the activation
+    # environment has a near-empty PATH.
+    (lib.optionalString (!cfg.enable && primaryUser != null) ''
+      target="${omabarApp}"
+      uid=$(/usr/bin/id -u ${primaryUser})
+
+      /bin/launchctl bootout "gui/$uid/org.nixos.omabar" 2>/dev/null || true
+      /usr/bin/pkill -x Omabar 2>/dev/null || true
+
+      if [ -e "$target" ]; then
+        rm -rf "$target"
+        echo "omabar: disabled, removed $target"
+      fi
+    '')
+  );
+    # The options below only mean anything while omabar is enabled, so they are
+    # guarded one attribute at a time instead of by wrapping the whole body in
+    # `mkIf cfg.enable`. Merging an unconditional attrset with an mkIf one --
+    # `{ a = ...; } // mkIf cond { b = ...; }` -- copies `_type = "if"` onto
+    # the merged result, and the module system then treats the *entire* config
+    # as conditional. That silently discards the install/cleanup script above
+    # whenever omabar is disabled, which is precisely when cleanup must run.
+    services.omabar.configFile = lib.mkIf cfg.enable (
+      configGenerator.generate { cfg = cfg; }
+    );
+
+    fonts.packages = lib.mkIf cfg.enable cfg.fonts.packages;
 
     # Stable symlink for the config file — on nix-darwin reconfigure the
     # store path changes, but the /etc entry keeps the same path.  When
     # hotload is enabled the daemon's in-process FSEvents watcher and the
     # launchd WatchPaths both monitor this stable path.
-    environment.etc."omabar_config".source = cfg.configFile;
+    environment.etc."omabar_config".source = lib.mkIf cfg.enable cfg.configFile;
 
     # Install the signed bundle at a stable path the user can actually grant
     # Accessibility to, and run the daemon from that copy.
@@ -880,37 +965,6 @@ in
     # shows up under config.system.activationScripts, and is then silently never
     # executed. That left ~/Applications/Omabar.app missing while the
     # LaunchAgent pointed straight at it, so the bar could not start at all.
-    system.activationScripts.postActivation.text = lib.mkAfter (
-    lib.optionalString (cfg.enable && primaryUser != null) ''
-        target="${omabarApp}"
-        source="${pkgs.omabar}/Applications/Omabar.app"
-
-        if [ -d "$source" ]; then
-          mkdir -p "$(dirname "$target")"
-          # Replace atomically-ish: build the new copy alongside, then swap, so
-          # a running daemon is never left with a half-written bundle.
-          rm -rf "$target.new"
-          mkdir -p "$target.new"
-          cp -R "$source/." "$target.new/"
-          rm -rf "$target"
-          mv "$target.new" "$target"
-
-          if [ ! -x "$target/Contents/MacOS/Omabar" ]; then
-            echo "omabar: installed bundle is missing its executable" >&2
-            exit 1
-          fi
-        else
-          # A caller overrode `package` with a derivation that ships no bundle.
-          # Fall back to the bare binary so the bar still runs; it just will
-          # not be clickable, because a cdhash identity cannot keep a grant.
-          mkdir -p "$(dirname "$target")/Omabar.app/Contents/MacOS"
-          cp -R "${pkgs.omabar}/bin/omabar" \
-            "$target/Contents/MacOS/Omabar" 2>/dev/null || true
-          echo "omabar: WARNING - ${pkgs.omabar} ships no signed bundle;" >&2
-          echo "omabar: WARNING - clicks will break on every rebuild." >&2
-        fi
-      ''
-    );
 
     # The bar is a menu-bar app: it needs the user's GUI session (WindowServer,
     # CoreVideo, CFPreferences) and it refuses to run as root. nix-darwin's
@@ -953,7 +1007,18 @@ in
                  `identifier "com.nowarelabs.omabar"` requirement, so one grant
                  survives rebuilds. Falls back to the bare binary if a caller
                  overrides the package with one that has no bundle. -->
-            <string>/bin/wait4path /nix/store &amp;&amp; exec ${lib.escapeShellArg omabarBin} --config ${lib.escapeShellArg (if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile)}</string>
+            <!-- --foreground keeps the process in the foreground so launchd
+                 supervises the real PID instead of a short-lived parent that
+                 _exit(0)s (daemonize() in src/main.c). Without it, launchd
+                 saw the job finish on the parent's exit, and the forked child
+                 was an orphan launchd did not track: unloading or deleting the
+                 plist could not stop it, so `enable = false` left the bar on
+                 screen until something killed it by hand. src/main.c documents
+                 why the fork exists at all — the child, not a fork-surviving
+                 parent, must perform the CoreFoundation/CoreVideo bootstrap —
+                 and --foreground satisfies that equally well, because there is
+                 no fork: this process *is* the one that calls omabar_init(). -->
+            <string>/bin/wait4path /nix/store &amp;&amp; exec ${lib.escapeShellArg omabarBin} --foreground --config ${lib.escapeShellArg (if cfg.daemon.hotload then "/etc/omabar_config" else toString cfg.configFile)}</string>
           </array>
           <key>EnvironmentVariables</key>
           <dict>
@@ -973,16 +1038,6 @@ in
           <string>Interactive</string>
           <key>ThrottleInterval</key>
           <integer>1</integer>
-          <!-- The daemon forks and lets its parent _exit(0) (see daemonize()
-               in src/main.c, which deliberately avoids setsid() so the child
-               stays in the user's GUI session for CFPreferences). launchd treats
-               that parent exit as the job finishing and, with the default
-               AbandonProcessGroup = false, tears down the process group,
-               killing the daemon on its first tick. Abandoning the group
-               leaves the forked child alive; KeepAlive is false, so nothing
-               reaps it. -->
-          <key>AbandonProcessGroup</key>
-          <true/>
         ${lib.optionalString cfg.daemon.hotload ''
           <key>WatchPaths</key>
           <array>
@@ -994,4 +1049,5 @@ in
       omabar.target = "org.nixos.omabar.plist";
     };
   };
+
 }

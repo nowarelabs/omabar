@@ -6,6 +6,7 @@
 #include "event_loop.h"
 #include "custom_events.h"
 #include "animation.h"
+#include <stdbool.h>
 
 struct bar_manager {
     struct bar **bars;
@@ -30,6 +31,11 @@ struct bar_manager {
     int sticky;
     int notch_width;
     int notch_offset;
+    /* When set (the default), a top bar on a notched display is pushed below
+       the camera housing/menu bar, so a floating rounded container is never
+       clipped. Clear it to keep the bar flush at y_offset and let it span the
+       menu bar band; notch_width still keeps centre items clear of the notch. */
+    bool notch_auto_offset;
     int y_offset;
     double alpha;
 
@@ -75,6 +81,7 @@ void bar_manager_set_topmost(struct bar_manager *bm, int topmost);
 void bar_manager_set_sticky(struct bar_manager *bm, int sticky);
 void bar_manager_set_notch_width(struct bar_manager *bm, int width);
 void bar_manager_set_notch_offset(struct bar_manager *bm, int offset);
+void bar_manager_set_notch_auto_offset(struct bar_manager *bm, bool enabled);
 void bar_manager_set_y_offset(struct bar_manager *bm, int offset);
 void bar_manager_set_alpha(struct bar_manager *bm, double alpha);
 void bar_manager_set_corner_radius(struct bar_manager *bm, int radius);

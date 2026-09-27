@@ -30,9 +30,14 @@ CGRect bar_get_frame(struct bar *bar) {
     if (display_has_notch(bar->did)) {
         if (g_bar_manager.notch_offset > 0) {
             bar_notch_offset = g_bar_manager.notch_offset;
-        } else if (g_bar_manager.position == 0) {
+        } else if (g_bar_manager.position == 0
+                   && g_bar_manager.notch_auto_offset) {
             /* No explicit override: drop a top bar below the camera housing /
-               menu bar so a floating, rounded container is never clipped. */
+               menu bar so a floating, rounded container is never clipped.
+               Cleared via notch_auto_offset, which is what a full-width bar
+               styled to sit *in* the menu bar band wants: it stays flush at
+               y_offset, and notch_width still keeps centre items out of the
+               camera housing. */
             bar_notch_offset = (int)lrint(display_nsscreen_top_inset(bar->did));
         }
     }

@@ -707,6 +707,10 @@ int config_load(const char *path, char *out_lock_file, size_t lock_file_size) {
         int notch_offset = (int)json_get_num(bar_obj, "notch_offset", 0);
         if (notch_offset != 0) bar_manager_set_notch_offset(&g_bar_manager, notch_offset);
 
+        bar_manager_set_notch_auto_offset(
+            &g_bar_manager,
+            json_get_bool(bar_obj, "notch_auto_offset", true));
+
         int sticky = json_get_bool(bar_obj, "sticky", true) ? 1 : 0;
         bar_manager_set_sticky(&g_bar_manager, sticky);
 

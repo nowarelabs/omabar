@@ -507,6 +507,40 @@ static int test_color_parsing(void) {
     return tests_failed == 0;
 }
 
+/* notch_auto_offset defaults to true, and an explicit false must survive
+   config_load. Without this, a full-width bar styled to sit in the menu bar
+   band cannot opt out of being pushed below the camera housing, because
+   notch_offset = 0 is indistinguishable from "unset". */
+static int test_notch_auto_offset(void) {
+    printf("\n=== test_notch_auto_offset ===\n");
+    const char *path = "/tmp/omabar_test_notch";
+    bar_manager_init(&g_bar_manager);
+
+    check("notch_auto_offset defaults to true",
+          g_bar_manager.notch_auto_offset ? 1 : 0);
+
+    const char *json =
+        "{"
+        "\"daemon\":{\"lock_file\":\"/tmp/omabar_notch.lock\"},"
+        "\"bar\":{\"notch_auto_offset\":false}"
+        "}";
+    FILE *f = fopen(path, "wb");
+    fwrite("OMABC", 1, 5, f);
+    fputc(0x01, f);
+    fwrite("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 1, 10, f);
+    fwrite(json, 1, strlen(json), f);
+    fclose(f);
+
+    char lock_file[256] = {0};
+    int result = config_load(path, lock_file, sizeof(lock_file));
+    check("config_load returns 0", result == 0);
+    check("explicit notch_auto_offset=false is honoured",
+          g_bar_manager.notch_auto_offset ? 0 : 1);
+
+    (void)remove(path);
+    return tests_failed == 0;
+}
+
 int main(int argc, char *argv[]) {
     printf("=== omabar config_loader regression test ===\n");
 
@@ -574,6 +608,7 @@ int main(int argc, char *argv[]) {
     bar_manager_init(&g_bar_manager);
 
     test_color_parsing();
+    test_notch_auto_offset();
 
     test_config_path_argument();
     test_foreground_argument();

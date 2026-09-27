@@ -197,6 +197,7 @@ let
         sticky = cfg.bar.sticky or true;
         notch_width = cfg.bar.notch_width or 0;
         notch_offset = cfg.bar.notch_offset or 0;
+        notch_auto_offset = cfg.bar.notch_auto_offset or true;
         y_offset = cfg.bar.y_offset or 0;
         alpha = cfg.bar.alpha or 1.0;
         corner_radius = cfg.bar.corner_radius or 0;

@@ -516,6 +516,7 @@ void bar_manager_init(struct bar_manager *bm) {
     bm->sticky = 1;
     bm->notch_width = 0;
     bm->notch_offset = 0;
+    bm->notch_auto_offset = true;
     bm->y_offset = 0;
     bm->alpha = 1.0;
 
@@ -858,6 +859,12 @@ void bar_manager_set_notch_width(struct bar_manager *bm, int width) {
 void bar_manager_set_notch_offset(struct bar_manager *bm, int offset) {
     if (bm->notch_offset == offset) return;
     bm->notch_offset = offset;
+    bm->bar_needs_resize = 1;
+}
+
+void bar_manager_set_notch_auto_offset(struct bar_manager *bm, bool enabled) {
+    if (bm->notch_auto_offset == enabled) return;
+    bm->notch_auto_offset = enabled;
     bm->bar_needs_resize = 1;
 }
 
