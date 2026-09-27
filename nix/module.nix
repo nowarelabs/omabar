@@ -881,7 +881,7 @@ in
     # executed. That left ~/Applications/Omabar.app missing while the
     # LaunchAgent pointed straight at it, so the bar could not start at all.
     system.activationScripts.postActivation.text = lib.mkAfter (
-    if cfg.enable && primaryUser != null then ''
+    lib.optionalString (cfg.enable && primaryUser != null) ''
         target="${omabarApp}"
         source="${pkgs.omabar}/Applications/Omabar.app"
 
@@ -910,7 +910,7 @@ in
           echo "omabar: WARNING - clicks will break on every rebuild." >&2
         fi
       ''
-    else '');
+    );
 
     # The bar is a menu-bar app: it needs the user's GUI session (WindowServer,
     # CoreVideo, CFPreferences) and it refuses to run as root. nix-darwin's
