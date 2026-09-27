@@ -907,23 +907,41 @@ in
         echo "omabar: WARNING - clicks will break on every rebuild." >&2
       fi
 
-      # Recover from an instance the launchd job does not track. A generation
-      # that predates --foreground forked, and that orphan keeps the daemon
-      # lockfile forever: the agent starts, fails to take the lock, exits 1,
-      # and because KeepAlive is false nothing retries. The symptom is nasty
-      # and silent — launchd reports the job as not running while the old bar
-      # is still on screen, still rendering the *old* config, so a geometry or
-      # feature change appears to do nothing.
+      # Make sure the agent is actually running now that the bundle is in place.
       #
-      # Detect exactly that case: launchd has no live pid for the job, yet an
-      # Omabar process exists. A tracked instance always has a pid, so this
-      # cannot disturb a healthy bar and will not restart it on every rebuild.
+      # Two distinct ways it can fail to be running, both invisible unless
+      # checked for:
+      #
+      # 1. Never started. setupLaunchAgents runs *before* this postActivation
+      #    script, so on a re-enable the agent is launched while
+      #    ~/Applications/Omabar.app is still the version enable=false deleted.
+      #    The launch fails on a missing binary and, KeepAlive being false,
+      #    nothing retries — leaving a correctly installed bundle with no bar.
+      #
+      # 2. Blocked by an orphan. A generation predating --foreground forked,
+      #    and that orphan keeps the daemon lockfile forever: the agent starts,
+      #    fails to take the lock, exits 1, and again nothing retries. This is
+      #    the nastier one, because launchd then reports the job as "not
+      #    running, last exit code 1" while the old bar is still on screen
+      #    still rendering the OLD config — so a geometry or feature change
+      #    looks like the rebuild did nothing. I hit exactly this: set the bar
+      #    into the menu bar band, rebuilt, and measured the pre-rebuild PID
+      #    still drawing the old 44pt floating bar. Reading that process's
+      #    --config showed the stale store path, which is what identified it.
+      #
+      # Only acts when launchd has no live pid for the job, and a tracked
+      # instance always has one, so a healthy bar is never restarted and
+      # ordinary rebuilds are unaffected.
       job_pid=$(/bin/launchctl print "gui/$uid/org.nixos.omabar" 2>/dev/null \
         | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\).*/\1/p' | head -1)
-      if [ -z "$job_pid" ] && /usr/bin/pgrep -x Omabar >/dev/null 2>&1; then
-        echo "omabar: untracked instance holds the lock; restarting the agent" >&2
-        /usr/bin/pkill -x Omabar 2>/dev/null || true
-        sleep 1
+      if [ -z "$job_pid" ]; then
+        # An instance the job does not track would keep winning the lockfile,
+        # so clear it before asking launchd to start a fresh one.
+        if /usr/bin/pgrep -x Omabar >/dev/null 2>&1; then
+          echo "omabar: untracked instance holds the lock; restarting the agent" >&2
+          /usr/bin/pkill -x Omabar 2>/dev/null || true
+          sleep 1
+        fi
         /bin/launchctl kickstart -k "gui/$uid/org.nixos.omabar" 2>/dev/null || true
       fi
     '') +
