@@ -61,7 +61,14 @@ enum bar_item_kind {
     BAR_KIND_WIFI,
     BAR_KIND_MEDIA,
     BAR_KIND_FRONT_APP,
-    BAR_KIND_DIVIDER
+    BAR_KIND_DIVIDER,
+    /* The frontmost app's own menu bar, re-hosted from the native one omabar
+       covers. APP_LOGO is the system Apple menu, APP_MENUS renders the
+       app-provided menus ("File", "Edit", ...) as one row of clickable slots,
+       and APP_MENU_ITEM is one leaf inside a popup. See app_menus.m. */
+    BAR_KIND_APP_LOGO,
+    BAR_KIND_APP_MENUS,
+    BAR_KIND_APP_MENU_ITEM
 };
 
 enum bar_item_position {
@@ -110,6 +117,18 @@ struct bar_item {
     int space_count;
     uint64_t space_ids[OMABAR_MAX_SPACES];
     int space_gap;
+
+    /* app menu state */
+    int app_menu_first;           /* APP_MENUS: first menu index to render */
+    int app_menu_slot;            /* APP_MENU_ITEM: which leaf to press */
+    int app_menu_menu;            /* APP_MENU_ITEM: the menu the leaves came
+                                     from, so the leaf cache can be reloaded
+                                     if the menus were re-read underneath us */
+    float app_menu_row_w;         /* APP_MENU_ITEM: width shared by the rows,
+                                     so the shortcut column lines up */
+    char *app_menu_shortcut;      /* APP_MENU_ITEM: shortcut to draw */
+    struct bar_item *app_menu_host; /* APP_MENU_ITEM: owner of the popup, so a
+                                       leaf can close the menu it came from */
 
     char *script;
     char *click_script;

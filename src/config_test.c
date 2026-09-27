@@ -13,6 +13,7 @@
 #include "bar_manager.h"
 #include "bar_item.h"
 #include "color.h"
+#include "app_menus.h"
 #include "misc/env_vars.h"
 
 #include <stdio.h>
@@ -218,6 +219,16 @@ static void make_full_config(const char *path) {
                     "\"position\":\"c\","
                     "\"divider_width\":3,"
                     "\"divider_color\":\"0x80ff00ff\""
+                "},"
+                "{"
+                    "\"name\":\"logo\","
+                    "\"type\":\"app_logo\","
+                    "\"position\":\"l\""
+                "},"
+                "{"
+                    "\"name\":\"menus\","
+                    "\"type\":\"app_menus\","
+                    "\"position\":\"l\""
                 "}"
             "],"
             "\"center_right\":["
@@ -326,6 +337,29 @@ static int test_full_config(void) {
         check_int("divider width = 3", sep->divider_width, 3);
         check("divider color applied",
               sep->divider_color.b > 0.9f && sep->divider_color.a > 0.4f);
+    }
+
+    /* the app's own menu bar, re-hosted from the native one */
+    struct bar_item *logo = NULL, *menus = NULL;
+    for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
+        struct bar_item *it = g_bar_manager.bar_items[i];
+        if (!it || !it->name) continue;
+        if (strcmp(it->name, "logo") == 0) logo = it;
+        if (strcmp(it->name, "menus") == 0) menus = it;
+    }
+    check("app_logo item present", logo != NULL);
+    if (logo) {
+        check_int("app_logo kind = APP_LOGO", logo->kind, BAR_KIND_APP_LOGO);
+        check_int("app_logo position = LEFT", logo->position, POSITION_LEFT);
+    }
+    check("app_menus item present", menus != NULL);
+    if (menus) {
+        check_int("app_menus kind = APP_MENUS", menus->kind, BAR_KIND_APP_MENUS);
+        check_int("app_menus position = LEFT", menus->position, POSITION_LEFT);
+        /* menus 0 and 1 are the Apple and app menus, drawn by their own
+           kinds, so the row starts past both */
+        check_int("app_menus starts past Apple and app menus",
+                  menus->app_menu_first, OMABAR_APP_MENU_FIRST);
     }
 
     /* Regression: measuring an item must not mutate the text offsets. Folding

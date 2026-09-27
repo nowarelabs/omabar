@@ -417,6 +417,9 @@ static enum bar_item_kind parse_item_kind(const char *tstr) {
     if (strcmp(tstr, "media") == 0) return BAR_KIND_MEDIA;
     if (strcmp(tstr, "front_app") == 0) return BAR_KIND_FRONT_APP;
     if (strcmp(tstr, "divider") == 0) return BAR_KIND_DIVIDER;
+    if (strcmp(tstr, "app_logo") == 0) return BAR_KIND_APP_LOGO;
+    if (strcmp(tstr, "app_menus") == 0) return BAR_KIND_APP_MENUS;
+    if (strcmp(tstr, "app_menu_item") == 0) return BAR_KIND_APP_MENU_ITEM;
     return BAR_KIND_GENERIC;
 }
 

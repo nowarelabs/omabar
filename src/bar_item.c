@@ -12,6 +12,7 @@
 #include "media.h"
 #include "display.h"
 #include "app_windows.h"
+#include "app_menus.h"
 #include <syslog.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,6 +321,28 @@ void bar_item_apply_builtin_content(struct bar_item *item) {
         break;
     }
 
+    case BAR_KIND_APP_LOGO: {
+        /* The system Apple menu is always menu 0, so its presence is the only
+           thing to check. */
+        int menus = app_menus_refresh();
+        item->hidden = !(menus > OMABAR_APP_MENU_APPLE);
+        break;
+    }
+
+    case BAR_KIND_APP_MENUS: {
+        /* A different app offers a different set of menus, so this item's
+           width changes with the front app; hidden entirely when the app
+           offers none beyond its own name. */
+        int menus = app_menus_refresh();
+        int count = menus - item->app_menu_first;
+        item->hidden = !(count > 0);
+        break;
+    }
+
+    case BAR_KIND_APP_MENU_ITEM:
+        /* popup leaves are filled in when the menu is opened, not here */
+        return;
+
     default:
         return;
     }
@@ -337,6 +360,9 @@ void bar_item_init(struct bar_item *item) {
     item->update_mask = 0;
     item->space_count = 1;
     item->space_gap = 4;
+    /* menus 0 and 1 are the Apple and app menus, drawn by the app_logo and
+       front_app kinds; an app_menus item starts past both */
+    item->app_menu_first = OMABAR_APP_MENU_FIRST;
     item->divider_width = 1;
     text_init(&item->icon);
     text_init(&item->label);
@@ -364,6 +390,8 @@ void bar_item_destroy(struct bar_item *item) {
     free(item->script);
     free(item->click_script);
     free(item->format);
+    free(item->app_menu_shortcut);
+    item->app_menu_shortcut = NULL;
     free(item->scroll_values);
     free(item->windows);
     for (int i = 0; i < item->icon_strip_count; i++) {
@@ -496,6 +524,11 @@ struct bar_item *bar_item_clone(const struct bar_item *src) {
     dst->icon_x_offset = src->icon_x_offset;
     dst->update_interval = src->update_interval;
     dst->index = src->index;
+    dst->app_menu_first = src->app_menu_first;
+    dst->app_menu_slot = src->app_menu_slot;
+    dst->app_menu_row_w = src->app_menu_row_w;
+    dst->app_menu_shortcut = src->app_menu_shortcut
+                                 ? strdup(src->app_menu_shortcut) : NULL;
 
     if (src->popup) {
         dst->popup = calloc(1, sizeof(*dst->popup));
@@ -526,12 +559,256 @@ struct window *bar_item_get_window(struct bar_item *item, int adid) {
     return item->windows[0];
 }
 
+/* ---- app menus ----------------------------------------------------------
+   omabar covers the native menu bar, so the frontmost app's own menus have
+   to be re-hosted in ours. They arrive through the Accessibility API (see
+   app_menus.m) and are split across three item kinds so a theme can place
+   each part independently:
+
+     app_logo    the system Apple menu, drawn as the Apple symbol
+     front_app   the app's own menu, drawn as the app name (an existing kind)
+     app_menus   the app-provided menus -- "File", "Edit", ... -- as one row
+
+   app_menus renders every menu it is handed as a separate clickable slot
+   inside a single item, exactly the way a space strip renders one chip per
+   space. That leaves the bar's layout code untouched and lets the slot count
+   change with the front app, which is the whole point: Chrome and Finder do
+   not offer the same menus. */
+
+#define APP_MENU_PAD 8.0f
+#define APP_MENU_SHORTCUT_GAP 16.0f
+
+/* Slot widths for the menus this item renders, measured with the label font.
+   Drawing and hit testing both go through this, so they cannot drift apart. */
+static int bar_item_app_menus_slots(struct bar_item *item, float *widths) {
+    int total = app_menus_refresh();
+    int first = item->app_menu_first;
+    if (total <= first) return 0;
+
+    int count = total - first;
+    if (count > OMABAR_MAX_APP_MENUS) count = OMABAR_MAX_APP_MENUS;
+    for (int i = 0; i < count; i++) {
+        const char *title = app_menus_title(first + i);
+        widths[i] = text_measure(item->label.font, title) + APP_MENU_PAD * 2.0f;
+    }
+    return count;
+}
+
+static float bar_item_app_menus_width(struct bar_item *item) {
+    float widths[OMABAR_MAX_APP_MENUS];
+    int count = bar_item_app_menus_slots(item, widths);
+    float total = 0.0f;
+    for (int i = 0; i < count; i++) total += widths[i];
+    return total;
+}
+
+/* The Apple symbol is a template image, so it is drawn pre-tinted: the tint is
+   baked into a cached image by app_menus_apple_logo_tinted, which keeps the
+   per-frame cost down to a single draw. */
+static void bar_item_app_logo_draw(struct bar_item *item, CGContextRef ctx,
+                                   CGRect frame) {
+    
+    CGImageRef image = app_menus_apple_logo_tinted(
+        item->label.color.r, item->label.color.g, item->label.color.b,
+        item->label.color.a);
+    if (!image) {  return; }
+
+    float size = item->label.font ? (float)item->label.font->size : 14.0f;
+    if (size <= 0.0f) size = 14.0f;
+    size *= 1.15f; /* the logo reads small at exactly text size */
+
+    CGRect box = CGRectMake(frame.origin.x + (frame.size.width - size) / 2.0f,
+                            frame.origin.y + (frame.size.height - size) / 2.0f,
+                            size, size);
+
+    CGContextSaveGState(ctx);
+    CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+    CGContextDrawImage(ctx, box, image);
+    CGContextRestoreGState(ctx);
+}
+
+/* A slot under the click, or -1. *offset receives the slot's left edge. */
+static int bar_item_app_menus_hit(struct bar_item *item, CGPoint point,
+                                  float *offset) {
+    float widths[OMABAR_MAX_APP_MENUS];
+    int count = bar_item_app_menus_slots(item, widths);
+    float x = 0.0f;
+
+    for (int i = 0; i < count; i++) {
+        if (point.x >= x && point.x < x + widths[i]) {
+            if (offset) *offset = x;
+            return item->app_menu_first + i;
+        }
+        x += widths[i];
+    }
+    return -1;
+}
+
+static void bar_item_app_menus_draw(struct bar_item *item, CGContextRef ctx,
+                                    CGRect frame) {
+    float widths[OMABAR_MAX_APP_MENUS];
+    int count = bar_item_app_menus_slots(item, widths);
+    float h = item->label.line.ascent + item->label.line.descent;
+    float x = 0.0f;
+
+    for (int i = 0; i < count; i++) {
+        const char *title = app_menus_title(item->app_menu_first + i);
+        
+        /* The label is re-pointed at each title in turn, the same way the
+           space strip re-points item->icon per chip. This kind's width comes
+           from bar_item_app_menus_width rather than item->label.line.width, so
+           that re-pointing cannot make the row's geometry depend on whichever
+           title was drawn last. */
+        text_set_string(&item->label, title);
+        float w = text_measure(item->label.font, title);
+        CGRect text_frame = CGRectMake(x + (widths[i] - w) / 2.0f,
+                                       (frame.size.height - h) / 2.0f, w, h);
+        text_draw(&item->label, ctx, text_frame);
+        x += widths[i];
+    }
+}
+
+/* Fill the host item's popup with a menu's real leaves and open it.
+
+   The popup is rebuilt on every open: leaves come and go as the app's state
+   changes ("Forward" greys out, a "Sign In" item appears), and rebuilding is
+   the only way to be sure the list matches what the app itself would show. */
+static void bar_item_app_menu_open(struct bar_item *item, int menu) {
+    int leaves = app_menus_load_items(menu);
+    
+    if (leaves <= 0) return;
+
+    if (!item->popup) {
+        item->popup = calloc(1, sizeof(*item->popup));
+        if (!item->popup) return;
+    } else {
+        /* popup_destroy frees the item array but not the items in it */
+        for (int i = 0; i < item->popup->item_count; i++)
+            bar_item_destroy(item->popup->items[i]);
+        popup_destroy(item->popup);
+    }
+    popup_init(item->popup, item);
+
+    /* One width for every row, so the shortcuts line up in a column and the
+       popup takes its width from a single row length. */
+    float row = 0.0f;
+    for (int i = 0; i < leaves; i++) {
+        if (app_menus_item_is_separator(i)) continue;
+        float w = text_measure(item->label.font, app_menus_item_title(i));
+        const char *sc = app_menus_item_shortcut(i);
+        if (sc && sc[0]) w += APP_MENU_SHORTCUT_GAP
+                            + text_measure(item->label.font, sc);
+        if (w > row) row = w;
+    }
+    if (row <= 0.0f) row = text_measure(item->label.font, " ");
+
+    for (int i = 0; i < leaves; i++) {
+        struct bar_item *leaf = calloc(1, sizeof(*leaf));
+        if (!leaf) break;
+        bar_item_init(leaf);
+
+        leaf->type = BAR_ITEM;
+        leaf->kind = BAR_KIND_APP_MENU_ITEM;
+        leaf->position = item->position;
+        leaf->padding_left = 4;
+        leaf->padding_right = 4;
+        leaf->app_menu_slot = i;
+        leaf->app_menu_row_w = row;
+        leaf->app_menu_host = item;
+        leaf->app_menu_shortcut = strdup(app_menus_item_shortcut(i));
+
+        /* the font object is owned by the config, not by the item, so the
+           popup can borrow the host's without a second copy to free */
+        bar_item_set_label_font(leaf, item->label.font);
+        bar_item_set_label_color(leaf, item->label.color);
+        if (!app_menus_item_enabled(i)) {
+            bar_item_set_label_color(leaf,
+                                     color_with_alpha(item->label.color, 0.4f));
+        }
+        text_set_string(&leaf->label, app_menus_item_title(i));
+        leaf->click_enabled = !app_menus_item_is_separator(i)
+                              && app_menus_item_enabled(i);
+
+        leaf->app_menu_menu = menu;
+        popup_add_item(item->popup, leaf);
+    }
+
+    popup_open(item->popup);
+}
+
+/* A menu re-read (app switched, or the front-app event fired) clears the
+   shared leaf cache, which would leave an already-open popup blank. Reload on
+   demand instead: the first draw or click after a re-read pays one AX read
+   and the cache stays warm for every frame after that. */
+static void bar_item_app_menu_ensure_items(struct bar_item *item) {
+    if (!item || item->app_menu_menu < 0) return;
+    if (app_menus_items_menu() == item->app_menu_menu
+        && app_menus_item_count() > 0)
+        return;
+    app_menus_load_items(item->app_menu_menu);
+}
+
+/* A leaf draws its title flush left and its shortcut flush right in the row
+   width the popup settled on, which is what lines the column up. */
+static void bar_item_app_menu_item_draw(struct bar_item *item, CGContextRef ctx,
+                                        CGRect frame) {
+    bar_item_app_menu_ensure_items(item);
+    float h = item->label.line.ascent + item->label.line.descent;
+    float y = (frame.size.height - h) / 2.0f;
+
+    if (app_menus_item_is_separator(item->app_menu_slot)) {
+        /* a hairline, the way AppKit separates groups of items */
+        float mid = frame.origin.y + frame.size.height / 2.0f;
+        CGContextSaveGState(ctx);
+        CGContextSetLineWidth(ctx, 1.0f);
+        CGContextSetRGBStrokeColor(ctx, item->label.color.r,
+                                    item->label.color.g, item->label.color.b,
+                                    item->label.color.a * 0.35f);
+        CGContextMoveToPoint(ctx, frame.origin.x, mid);
+        CGContextAddLineToPoint(ctx, frame.origin.x + frame.size.width, mid);
+        CGContextStrokePath(ctx);
+        CGContextRestoreGState(ctx);
+        return;
+    }
+
+    CGRect title_frame = CGRectMake(frame.origin.x, y,
+                                    item->label.line.width, h);
+    text_draw(&item->label, ctx, title_frame);
+
+    const char *sc = item->app_menu_shortcut;
+    if (sc && sc[0]) {
+        float sw = text_measure(item->label.font, sc);
+        CGRect sc_frame = CGRectMake(frame.origin.x + item->app_menu_row_w - sw,
+                                     y, sw, h);
+        struct text tmp;
+        text_init(&tmp);
+        text_set_font(&tmp, item->label.font);
+        text_set_color(&tmp, item->label.color);
+        text_set_string(&tmp, sc);
+        text_draw(&tmp, ctx, sc_frame);
+        text_destroy(&tmp);
+    }
+}
+
 float bar_item_get_content_length(struct bar_item *item) {
     if (!item) return 0;
 
     /* a space strip is as wide as its whole chip row, padding included */
     if (item->type == BAR_COMPONENT_SPACE)
         return bar_item_space_row_width(item);
+
+    /* the menu row is as wide as all of its slots; the logo is a square */
+    if (item->kind == BAR_KIND_APP_MENUS)
+        return bar_item_app_menus_width(item);
+
+    if (item->kind == BAR_KIND_APP_LOGO) {
+        float size = item->label.font ? (float)item->label.font->size : 14.0f;
+        if (size <= 0.0f) size = 14.0f;
+        return size * 1.15f;
+    }
+
+    /* every popup row shares one width so the shortcut column lines up */
+    if (item->kind == BAR_KIND_APP_MENU_ITEM) return item->app_menu_row_w;
 
     float icon_w = bar_item_icon_width(item);
     if (icon_w <= 0.0f) icon_w = item->icon.line.width;
@@ -656,6 +933,12 @@ static void bar_item_refresh(struct bar_item *item) {
 void bar_item_update(struct bar_item *item, const char *sender, const char *info) {
     if (!item) return;
 
+    /* The menu cache is keyed on the front app, so an app switch has to force a
+       re-read before the new app's menus are measured. */
+    if (info && strcmp(info, "front_app_switched") == 0
+        && (item->kind == BAR_KIND_APP_LOGO || item->kind == BAR_KIND_APP_MENUS))
+        app_menus_invalidate();
+
     /* built-in kinds render their own value; scripts (if any) take over */
     bar_item_apply_builtin_content(item);
 
@@ -692,6 +975,44 @@ void bar_item_on_click(struct bar_item *item, uint32_t button,
 
     if (item->type == BAR_COMPONENT_SPACE) {
         bar_item_space_clicked(item, point);
+        return;
+    }
+
+    /* the Apple menu and the app's menus both open the menu under the click;
+       the leaves inside a popup perform their command instead */
+    if (item->kind == BAR_KIND_APP_LOGO) {
+        if (button == 0) bar_item_app_menu_open(item, OMABAR_APP_MENU_APPLE);
+        return;
+    }
+
+    if (item->kind == BAR_KIND_APP_MENUS) {
+        if (button == 0) {
+            int menu = bar_item_app_menus_hit(item, point, NULL);
+            if (menu >= 0) bar_item_app_menu_open(item, menu);
+        }
+        return;
+    }
+
+    if (item->kind == BAR_KIND_APP_MENU_ITEM)
+
+
+    if (item->kind == BAR_KIND_APP_MENU_ITEM) {
+        bar_item_app_menu_ensure_items(item);
+        /* check the live state, not the one captured when the popup was built:
+           the app may have greyed the item out since */
+        if (button != 0 || !item->click_enabled
+            || app_menus_item_is_separator(item->app_menu_slot)
+            || !app_menus_item_enabled(item->app_menu_slot))
+            return;
+        int pr = app_menus_press(item->app_menu_slot);
+        
+        if (pr == 0) {
+            /* the command has run against the app, so get the menu out of the
+               way instead of leaving it floating over the result */
+            struct bar_item *host = item->app_menu_host;
+            if (host && host->popup && host->popup->is_open)
+                popup_close(host->popup);
+        }
         return;
     }
 
@@ -912,6 +1233,38 @@ void bar_item_draw(struct bar_item *item, struct bar *bar, CGContextRef ctx) {
         float sh = (float)BAR_ITEM_ROW_HEIGHT;
         CGRect sframe = CGRectMake(0, (float)item->y_offset, sw, sh);
         bar_item_space_draw(item, bar, ctx, sframe);
+        return;
+    }
+
+    /* the app's menus draw their own slots, and the leaf kind is drawn by the
+       popup that hosts it */
+    if (item->kind == BAR_KIND_APP_LOGO) {
+        float size = item->label.font ? (float)item->label.font->size : 14.0f;
+        if (size <= 0.0f) size = 14.0f;
+        /* full-height frame: the draw helper centres the square in the row,
+           so only the horizontal centring is ours to do */
+        float side = size * 1.15f;
+        CGRect frame = CGRectMake((item->padding_left - item->padding_right) / 2.0f,
+                                  (float)item->y_offset, side,
+                                  (float)BAR_ITEM_ROW_HEIGHT);
+        bar_item_app_logo_draw(item, ctx, frame);
+        return;
+    }
+
+    if (item->kind == BAR_KIND_APP_MENUS) {
+        float w = bar_item_app_menus_width(item);
+        CGRect frame = CGRectMake(0, (float)item->y_offset, w,
+                                  (float)BAR_ITEM_ROW_HEIGHT);
+        bar_item_app_menus_draw(item, ctx, frame);
+        return;
+    }
+
+    if (item->kind == BAR_KIND_APP_MENU_ITEM) {
+        float w = item->padding_left + item->app_menu_row_w
+                  + (float)item->padding_right;
+        CGRect frame = CGRectMake(0, (float)item->y_offset, w,
+                                  (float)BAR_ITEM_ROW_HEIGHT);
+        bar_item_app_menu_item_draw(item, ctx, frame);
         return;
     }
 

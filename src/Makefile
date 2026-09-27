@@ -29,14 +29,14 @@ _C_SRC := main.c config.c event_loop.c event.c bar_manager.c bar.c bar_item.c \
           group.c popup.c animation.c mouse.c display.c \
           volume.c power.c custom_events.c ipc.c ipc_client.c plugin.c \
           hotload.c private_shim.c workspace.m display_nsscreen.m \
-          media.m wifi.m app_windows.m mach.c dnd.c
+          media.m wifi.m app_windows.m app_menus.m mach.c dnd.c
 
 _OBJ := main.o config.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
         window.o surface.o context.o text.o font.o color.o \
         background.o shadow.o image.o graph.o alias.o slider.o \
         group.o popup.o animation.o mouse.o display.o \
         volume.o power.o custom_events.o ipc.o ipc_client.o plugin.o \
-        hotload.o private_shim.o app_windows.o workspace.o \
+        hotload.o private_shim.o app_windows.o app_menus.o workspace.o \
         display_nsscreen.o layer.o media.o wifi.o mach.o dnd.o
 
 _TEST_OBJ := config_test.o config.o event_loop.o event.o bar_manager.o bar.o bar_item.o \
@@ -44,7 +44,7 @@ _TEST_OBJ := config_test.o config.o event_loop.o event.o bar_manager.o bar.o bar
         background.o shadow.o image.o graph.o alias.o slider.o \
         group.o popup.o animation.o mouse.o display.o \
         volume.o power.o custom_events.o ipc.o ipc_client.o plugin.o \
-        hotload.o private_shim.o app_windows.o workspace.o \
+        hotload.o private_shim.o app_windows.o app_menus.o workspace.o \
         display_nsscreen.o layer.o media.o wifi.o mach.o dnd.o
 
 ifeq ($(NDEBUG),1)

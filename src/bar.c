@@ -407,15 +407,26 @@ void bar_draw(struct bar *bar) {
         CGContextRestoreGState(ctx);
     }
 
-    /* draw open popups (anchored below their host items) */
+    /* Draw open popups below the bar. Layout is top-down, so the bar itself
+       occupies y in [0, height) and a popup grows downward from there. The
+       window is extended downward to fit open popups (see below), so anchoring
+       a popup at frame.size.height would put it past the window's bottom edge
+       and render it entirely off-screen; anchor to the bar's own height.
+
+       Popups always grow downward, which is only correct for a top bar. A
+       bottom bar would have to grow upward and side bars sideways, so those
+       positions keep the previous anchor. */
+    float popup_anchor_y =
+        (g_bar_manager.position == 0 /* top */) ? (float)g_bar_manager.height
+                                               : (float)frame.size.height;
     for (int i = 0; i < bm->bar_item_count; i++) {
         struct bar_item *item = bm->bar_items[i];
         if (!item || !bar_draws_item(bar, item)) continue;
         if (!item->popup || !item->popup->is_open) continue;
 
         item->popup->anchor_x = item->x;
-        item->popup->anchor_y = (float)frame.size.height;
-        popup_calculate_bounds(item->popup, item->x, (float)frame.size.height);
+        item->popup->anchor_y = popup_anchor_y;
+        popup_calculate_bounds(item->popup, item->x, popup_anchor_y);
         popup_draw(item->popup, bar, ctx);
     }
 

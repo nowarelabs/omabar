@@ -6,8 +6,9 @@
  * the camera housing on notched MacBooks. Inside it, spaced like a status
  * bar rather than a menu bar:
  *
- *   left   workspace pills (one per Space, the active one solid) · hairline
- *          · now-playing note + artist/title
+ *   left   Apple logo · the front app's name · that app's own menus
+ *          (File, Edit, ...) · workspace pills (the active one solid)
+ *          · hairline · now-playing note + artist/title
  *   right  battery % · volume % · 24-hour date and time
  *
  * Icons are drawn as vectors by the bar itself, so this theme needs no icon
@@ -71,12 +72,58 @@
 
   items = {
     left = {
+      /* omabar covers the native menu bar, so the frontmost app's own menus
+         are re-hosted here, in the same order macOS uses them: the Apple
+         menu, the app's name, then the app-provided menus ("File", "Edit",
+         ...) and only then this bar's own pills.
+
+         These three read the front app through the Accessibility API, so they
+         change with whatever is in front and need no configuration per app. */
+
+      apple = {
+        order = 10;          # the system Apple menu, as the logo
+        type = "app_logo";
+        position = "l";
+        label = {
+          font = "SF Pro:Medium:13.0";
+          color = "0xecece4f7";
+        };
+        padding_left = 10;
+        padding_right = 8;
+      };
+
+      front_app = {
+        order = 20;          # the app's own menu, as its name
+        type = "front_app";
+        position = "l";
+        label = {
+          font = "SF Pro:Semibold:13.0";
+          color = "0xfff4f2fb";
+        };
+        padding_left = 4;
+        padding_right = 2;
+        update_mask = [ "front_app_switched" ];
+      };
+
+      app_menus = {
+        order = 30;          # the app's own menus: File, Edit, View, ...
+        type = "app_menus";
+        position = "l";
+        label = {
+          font = "SF Pro:Regular:13.0";
+          color = "0xdcece4f7";
+        };
+        padding_left = 4;
+        padding_right = 4;
+        update_mask = [ "front_app_switched" ];
+      };
+
       /* One pill per Space. The active one is a solid light chip with dark
          semibold numerals; the rest sit on a faint wash. Numbers come from
          the chip's position, so the strip reads 1, 2, 3, 4 rather than
          depending on an icon font. */
       spaces = {
-        order = 10;          # workspaces
+        order = 40;          # workspaces
         type = "space";
         position = "l";
         space_gap = 4;
@@ -102,7 +149,7 @@
 
       /* separator between the workspace strip and now playing */
       divider = {
-        order = 20;          # separator
+        order = 50;          # separator
         type = "divider";
         position = "l";
         divider_width = 1;
@@ -112,7 +159,7 @@
       };
 
       media = {
-        order = 30;          # now playing
+        order = 60;          # now playing
         type = "media";
         position = "l";
         label = {

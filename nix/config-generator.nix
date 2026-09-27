@@ -56,6 +56,9 @@ let
     wifi      = [ "wifi_changed" ];
     media     = [ "media_changed" "front_app_changed" ];
     front_app = [ "front_app_changed" ];
+    /* the app's own menus come from the front app, so they change with it */
+    app_logo   = [ "front_app_changed" ];
+    app_menus  = [ "front_app_changed" ];
     space     = [ "space_changed" "display_changed" ];
   };
 
